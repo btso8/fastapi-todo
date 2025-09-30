@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import os
@@ -7,7 +6,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import SQLModel, Session, create_engine, select
 
 # Your ORM model lives here
 from app.models import (
@@ -19,11 +18,18 @@ from app.models import (
 # -----------------------------------------------------------------------------
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
-engine = create_engine(DATABASE_URL, echo=False)
+
+# Handle special cases depending on backend
+engine_kwargs = {}
+
+if DATABASE_URL.startswith("sqlite"):
+    # SQLite requires this for multithreaded FastAPI
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, echo=False, **engine_kwargs)
 
 
 def get_session():
-    """FastAPI dependency that YIELDS a live SQLModel/SQLAlchemy Session."""
     with Session(engine) as session:
         yield session
 
@@ -45,8 +51,12 @@ class TaskOut(TaskIn):
 # -----------------------------------------------------------------------------
 # App + routes
 # -----------------------------------------------------------------------------
-app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)")
+app = FastAPI(title="FastAPI To-Do")
 
+@app.on_event("startup")
+def init_db():
+    if DATABASE_URL.startswith("sqlite"):
+        SQLModel.metadata.create_all(engine)
 
 @app.get("/health")
 def health_check():

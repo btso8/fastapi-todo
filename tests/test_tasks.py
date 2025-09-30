@@ -1,7 +1,3 @@
-# tests/test_tasks.py
-from typing import Any
-
-
 def status_ok(code: int) -> bool:
     # Be flexible (your create endpoint may return 200 or 201)
     return code in (200, 201)

@@ -1,12 +1,8 @@
-# tests/conftest.py
-import os
-import pathlib
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.main import app, get_session  # we will override this dependency
-from app.models import Task  # ensure model is imported so its table is in metadata
+from app.main import app, get_session
 
 
 @pytest.fixture(scope="session")
