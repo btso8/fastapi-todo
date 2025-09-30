@@ -1,9 +1,15 @@
 version: "3.9"
 services:
-  web:
-    build: .
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: todo
+      POSTGRES_DB: todo
     ports:
-      - "8000:8000"
+      - "5432:5432"
     volumes:
-      - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
