@@ -25,6 +25,6 @@
 ---
 
 ## Notes
-- **MUST** = essential for MVP & assessment.  
-- **SHOULD** = nice-to-have; delivered if time allows (helps with distinction grade).  
-- Each Acceptance Criterion will be tested via **Pytest**, validated in **Swagger UI**, and evidenced with screenshots/logs in the Evidence Pack.  
+- **MUST** = essential for MVP & assessment.
+- **SHOULD** = nice-to-have; delivered if time allows (helps with distinction grade).
+- Each Acceptance Criterion will be tested via **Pytest**, validated in **Swagger UI**, and evidenced with screenshots/logs in the Evidence Pack.

@@ -1,19 +1,19 @@
 
 # FastAPI To-Do App
 
-A modern **To-Do API** built with **FastAPI**, **SQLModel**, and **Alembic** for migrations.  
-Includes full CRUD endpoints, search and filter support, and a pytest-based test suite.  
+A modern **To-Do API** built with **FastAPI**, **SQLModel**, and **Alembic** for migrations.
+Includes full CRUD endpoints, search and filter support, and a pytest-based test suite.
 
 ---
 
 ## ✨ Features
 
-- Create, read, update, complete, and delete tasks  
-- Filtering by search term, tag, and completion status  
-- Database migrations with Alembic  
-- SQLite for local dev, PostgreSQL-ready for production  
-- `.env` support for configuration  
-- pytest test suite with isolated DB  
+- Create, read, update, complete, and delete tasks
+- Filtering by search term, tag, and completion status
+- Database migrations with Alembic
+- SQLite for local dev, PostgreSQL-ready for production
+- `.env` support for configuration
+- pytest test suite with isolated DB
 - Clean `.gitignore` (ignores `.venv`, `.env`, caches, Docker, Terraform files, etc.)
 
 ---
@@ -84,7 +84,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-API docs available at:  
+API docs available at:
 ➡️ http://127.0.0.1:8000/docs
 
 ---
@@ -97,11 +97,11 @@ pytest -q
 
 Covers:
 
-- Healthcheck  
-- Create & retrieve tasks  
-- Filtering (search, tags, completed)  
-- Update & complete tasks  
-- Delete & 404 errors  
+- Healthcheck
+- Create & retrieve tasks
+- Filtering (search, tags, completed)
+- Update & complete tasks
+- Delete & 404 errors
 
 Tests run against a **temporary SQLite DB**, so `dev.db` is not affected.
 
@@ -145,10 +145,10 @@ curl -X DELETE http://127.0.0.1:8000/tasks/1
 
 ## 📌 Roadmap
 
-- ✅ Alembic migrations working  
-- ✅ Full pytest test suite  
-- ✅ Example API usage in README  
-- 🔜 JWT authentication  
-- 🔜 Dockerfile + Compose  
-- 🔜 Terraform infra  
-- 🔜 CI/CD pipeline  
+- ✅ Alembic migrations working
+- ✅ Full pytest test suite
+- ✅ Example API usage in README
+- 🔜 JWT authentication
+- 🔜 Dockerfile + Compose
+- 🔜 Terraform infra
+- 🔜 CI/CD pipeline

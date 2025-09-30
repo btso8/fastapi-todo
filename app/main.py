@@ -4,14 +4,14 @@ import os
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 # Your ORM model lives here
-from app.models import (
+from app.models import (  # Task(table=True) with fields: id, title, completed, description?, tag?
     Task,
-)  # Task(table=True) with fields: id, title, completed, description?, tag?
+)
 
 # -----------------------------------------------------------------------------
 # DB setup
@@ -53,10 +53,12 @@ class TaskOut(TaskIn):
 # -----------------------------------------------------------------------------
 app = FastAPI(title="FastAPI To-Do")
 
+
 @app.on_event("startup")
 def init_db():
     if DATABASE_URL.startswith("sqlite"):
         SQLModel.metadata.create_all(engine)
+
 
 @app.get("/health")
 def health_check():

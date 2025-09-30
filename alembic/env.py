@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 from logging.config import fileConfig
+from pathlib import Path
+
+from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
+from sqlmodel import SQLModel  # <-- import SQLModel from sqlmodel
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from dotenv import load_dotenv
-from sqlmodel import SQLModel  # <-- import SQLModel from sqlmodel
 
 # Load .env into os.environ
 load_dotenv()
@@ -26,7 +27,7 @@ if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Import models so tables register on SQLModel.metadata
-from app import models  # noqa: F401
+from app import models  # noqa: E402,F401
 
 # Alembic config + logging
 config = context.config
