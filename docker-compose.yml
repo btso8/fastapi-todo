@@ -1,5 +1,14 @@
 version: "3.9"
 services:
+  # api:
+  #   environment:
+  #     - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://todo:todo@db:5432/todo}
+  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
   db:
     image: postgres:16
     environment:

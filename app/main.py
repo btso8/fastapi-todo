@@ -10,17 +10,15 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 from sqlmodel import Session, create_engine, select
 
+from app.json_logging import setup_dual_logging
+
 # Your ORM model lives here
 from app.models import Task
 
 # -----------------------------------------------------------------------------
 # Logging setup
 # -----------------------------------------------------------------------------
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+setup_dual_logging()
 logger = logging.getLogger("app")
 
 # -----------------------------------------------------------------------------

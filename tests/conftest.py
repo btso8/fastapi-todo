@@ -1,8 +1,20 @@
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.main import app, get_session
+
+
+@pytest.fixture(autouse=True, scope="function")
+def reset_metrics_registry():
+    """Reset Prometheus collectors between tests (testing only)."""
+    collectors = list(getattr(REGISTRY, "_collector_to_names", {}).keys())
+    for c in collectors:
+        try:
+            REGISTRY.unregister(c)
+        except KeyError:
+            pass
 
 
 @pytest.fixture(scope="session")
