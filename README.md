@@ -1,154 +1,159 @@
-
 # FastAPI To-Do App
 
-A modern **To-Do API** built with **FastAPI**, **SQLModel**, and **Alembic** for migrations.
-Includes full CRUD endpoints, search and filter support, and a pytest-based test suite.
+A simple **FastAPI + SQLModel** to-do service with **SQLite/Postgres support**, **Alembic migrations**, **Docker Compose**, and **CI**.
+
+## Features
+- CRUD API for tasks (`/tasks`).
+- Works with **SQLite** (local dev) or **Postgres** (prod / Docker).
+- **Alembic** for database migrations.
+- **Dockerfile** + **docker-compose.yml** for containerized dev.
+- **Makefile** shortcuts for common commands.
+- **Pre-commit** hooks (Ruff, Black, isort).
+- **GitHub Actions CI** with lint + migrations + tests.
 
 ---
 
-## ✨ Features
+## Quickstart (Local Dev)
 
-- Create, read, update, complete, and delete tasks
-- Filtering by search term, tag, and completion status
-- Database migrations with Alembic
-- SQLite for local dev, PostgreSQL-ready for production
-- `.env` support for configuration
-- pytest test suite with isolated DB
-- Clean `.gitignore` (ignores `.venv`, `.env`, caches, Docker, Terraform files, etc.)
+1. Clone and enter project
+   ```bash
+   git clone <your-repo-url>
+   cd test-project
+   ```
 
----
+2. Create virtual environment
+   ```bash
+   python3.12 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-## 📂 Project Structure
+3. Install dependencies
+   ```bash
+   make install-dev
+   ```
 
-```
-.
-├── app/
-│   ├── main.py         # FastAPI entrypoint + routes
-│   ├── models.py       # SQLModel Task model
-│   ├── db.py           # Database session helpers
-│   └── ...
-├── alembic/
-│   ├── env.py          # Alembic config
-│   ├── script.py.mako  # Migration template
-│   └── versions/       # Migration history
-├── tests/
-│   ├── conftest.py     # Test DB + overrides
-│   └── test_tasks.py   # Task API test suite
-├── dev.db              # Local SQLite DB (ignored in git)
-├── .env                # Environment variables (ignored in git)
-├── .gitignore
-├── pyproject.toml      # Dependencies/config
-└── README.md
-```
+4. Run the app (SQLite by default)
+   ```bash
+   make dev
+   ```
+   → Open <http://127.0.0.1:8000/docs>
 
 ---
 
-## 🚀 Getting Started
+## Database Setup
 
-### 1. Clone & Setup
-```bash
-git clone <your-repo-url>
-cd test-project
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
----
-
-### 2. Configure Environment
-
-Create a `.env` file in the project root:
-
-```dotenv
+### Using SQLite (default)
+`.env.example`:
+```env
 DATABASE_URL=sqlite:///./dev.db
-# Or Postgres:
-# DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/tododb
+```
+Tables auto-create on startup.
+
+### Using Postgres (local)
+Start DB:
+```bash
+docker compose up -d db
+```
+`.env`:
+```env
+DATABASE_URL=postgresql+psycopg://todo:todo@localhost:5432/todo
+```
+Run migrations:
+```bash
+make migrate-up
+```
+
+### Using Postgres (in Docker network)
+If app runs inside `docker-compose`, use:
+```env
+DATABASE_URL=postgresql+psycopg://todo:todo@db:5432/todo
 ```
 
 ---
 
-### 3. Run Migrations
+## Migrations
+
+- New migration:
+  ```bash
+  make migrate-new m="add field"
+  ```
+- Apply latest:
+  ```bash
+  make migrate-up
+  ```
+- Roll back one:
+  ```bash
+  make migrate-down
+  ```
+
+---
+
+## Makefile Commands
+
+| Command                   | Description                         |
+|----------------------------|-------------------------------------|
+| `make install-dev`         | Install runtime + dev deps          |
+| `make install-prod`        | Install runtime deps only           |
+| `make dev`                 | Run FastAPI in dev mode             |
+| `make test`                | Run pytest with coverage            |
+| `make lint`                | Run Ruff/Black/isort checks         |
+| `make fmt`                 | Auto-format code                    |
+| `make migrate-new m="msg"` | Create new Alembic migration        |
+| `make migrate-up`          | Apply migrations                    |
+| `make migrate-down`        | Roll back one migration             |
+| `make up`                  | Start Docker Compose (API + DB)     |
+| `make down`                | Stop and remove Docker Compose      |
+| `make logs`                | Follow Docker logs                  |
+
+---
+
+## Pre-commit Hooks
+
+Install once:
 ```bash
-alembic upgrade head
+pre-commit install
+```
+
+Run on all files:
+```bash
+pre-commit run --all-files
 ```
 
 ---
 
-### 4. Run the App
+## Docker Usage
+
+Build & run app + Postgres:
 ```bash
-uvicorn app.main:app --reload
+make up
 ```
+→ API: <http://localhost:8000/docs>
+→ DB: `localhost:5432` (`todo:todo` / `todo`)
 
-API docs available at:
-➡️ http://127.0.0.1:8000/docs
-
----
-
-## 🧪 Running Tests
-
+Stop & clean:
 ```bash
-pytest -q
-```
-
-Covers:
-
-- Healthcheck
-- Create & retrieve tasks
-- Filtering (search, tags, completed)
-- Update & complete tasks
-- Delete & 404 errors
-
-Tests run against a **temporary SQLite DB**, so `dev.db` is not affected.
-
----
-
-## 📌 Example API Usage
-
-Create a new task:
-```bash
-curl -X POST http://127.0.0.1:8000/tasks/   -H "Content-Type: application/json"   -d '{"title": "Buy milk", "tag": "home"}'
-```
-
-List all tasks:
-```bash
-curl http://127.0.0.1:8000/tasks/
-```
-
-Get a task by ID:
-```bash
-curl http://127.0.0.1:8000/tasks/1
-```
-
-Update a task:
-```bash
-curl -X PUT http://127.0.0.1:8000/tasks/1   -H "Content-Type: application/json"   -d '{"title": "Buy oat milk", "tag": "home"}'
-```
-
-Mark a task complete:
-```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/1/complete
-```
-
-Delete a task:
-```bash
-curl -X DELETE http://127.0.0.1:8000/tasks/1
+make down
 ```
 
 ---
 
+## CI (GitHub Actions)
+
+- Installs runtime + dev deps.
+- Runs **Ruff/Black/isort** checks.
+- Runs `alembic upgrade head` against SQLite.
+- Runs **pytest**.
+
 ---
 
-## 📌 Roadmap
+## Health Check
 
-- ✅ Alembic migrations working
-- ✅ Full pytest test suite
-- ✅ Example API usage in README
-- 🔜 JWT authentication
-- 🔜 Dockerfile + Compose
-- 🔜 Terraform infra
-- 🔜 CI/CD pipeline
+- `/health` → returns `{ "status": "ok" }`
+
+---
+
+## Requirements
+
+- Python 3.12+
+- SQLite (built-in) or Postgres 16
+- Docker

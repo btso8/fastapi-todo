@@ -1,12 +1,21 @@
-.PHONY: dev test lint fmt migrate-new migrate-up migrate-down up down logs
+.PHONY: install-dev install-prod dev test lint fmt migrate-new migrate-up migrate-down up down logs help
 
-# -------- Python local --------
+# -------- Install --------
+install-prod:
+	pip install -r requirements.txt
+
+install-dev:
+	pip install -r requirements.txt -r requirements-dev.txt
+
+# -------- App run --------
 dev:
 	uvicorn app.main:app --reload
 
+# -------- Testing --------
 test:
-	pytest -q
+	pytest
 
+# -------- Lint & Format --------
 lint:
 	ruff check .
 	black --check .
@@ -28,7 +37,7 @@ migrate-up:
 migrate-down:
 	alembic downgrade -1
 
-# -------- Docker Compose (Postgres + API) --------
+# -------- Docker Compose --------
 up:
 	docker compose up -d
 
@@ -37,3 +46,8 @@ down:
 
 logs:
 	docker compose logs -f
+
+# -------- Helper --------
+help:
+	@echo "Available targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?##' Makefile | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
