@@ -1,35 +1,38 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, create_engine, select
 
 # Your ORM model lives here
-from app.models import (  # Task(table=True) with fields: id, title, completed, description?, tag?
-    Task,
+from app.models import Task
+
+# -----------------------------------------------------------------------------
+# Logging setup
+# -----------------------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logger = logging.getLogger("app")
 
 # -----------------------------------------------------------------------------
 # DB setup
 # -----------------------------------------------------------------------------
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
-
-# Handle special cases depending on backend
-engine_kwargs = {}
-
-if DATABASE_URL.startswith("sqlite"):
-    # SQLite requires this for multithreaded FastAPI
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-
-engine = create_engine(DATABASE_URL, echo=False, **engine_kwargs)
+engine = create_engine(DATABASE_URL, echo=False)
 
 
 def get_session():
+    """FastAPI dependency that YIELDS a live SQLModel/SQLAlchemy Session."""
     with Session(engine) as session:
         yield session
 
@@ -51,13 +54,29 @@ class TaskOut(TaskIn):
 # -----------------------------------------------------------------------------
 # App + routes
 # -----------------------------------------------------------------------------
-app = FastAPI(title="FastAPI To-Do")
+app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)")
+
+instrumentator = Instrumentator().instrument(app)
+instrumentator.expose(app, include_in_schema=False)
 
 
-@app.on_event("startup")
-def init_db():
-    if DATABASE_URL.startswith("sqlite"):
-        SQLModel.metadata.create_all(engine)
+@app.middleware("http")
+async def log_requests(request, call_next):
+    from time import perf_counter
+
+    start = perf_counter()
+    response = await call_next(request)
+    duration_ms = (perf_counter() - start) * 1000
+    logger.info(
+        "request",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_ms, 2),
+        },
+    )
+    return response
 
 
 @app.get("/health")
@@ -81,17 +100,19 @@ def list_tasks(
     completed: Optional[bool] = Query(default=None),
     session: Session = Depends(get_session),
 ):
-    # Start with a basic select; build WHEREs if you prefer DB-side filtering
     stmt = select(Task)
     items = session.exec(stmt).all()
 
-    # Lightweight Python-side filtering (fine for small dev datasets)
     if search:
         s = search.lower()
         items = [
             t
             for t in items
-            if s in (t.title or "").lower() or s in (t.description or "").lower()
+            if (
+                s in (t.title or "").lower()
+                or s in (t.description or "").lower()
+                or s in (t.tag or "").lower()
+            )
         ]
     if tag is not None:
         items = [t for t in items if t.tag == tag]

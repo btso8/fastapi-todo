@@ -22,12 +22,8 @@ def upgrade() -> None:
     op.create_table(
         "task",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column(
-            "title", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=False
-        ),
-        sa.Column(
-            "description", sqlmodel.sql.sqltypes.AutoString(length=2000), nullable=True
-        ),
+        sa.Column("title", sqlmodel.sql.sqltypes.AutoString(length=200), nullable=False),
+        sa.Column("description", sqlmodel.sql.sqltypes.AutoString(length=2000), nullable=True),
         sa.Column("tag", sqlmodel.sql.sqltypes.AutoString(length=50), nullable=True),
         sa.Column("completed", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),

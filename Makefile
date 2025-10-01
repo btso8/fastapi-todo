@@ -1,53 +1,48 @@
-.PHONY: install-dev install-prod dev test lint fmt migrate-new migrate-up migrate-down up down logs help
+.PHONY: install-dev install-prod dev test lint fmt coverage migrate-new migrate-up migrate-down up down logs help
 
-# -------- Install --------
-install-prod:
+install-prod: ## Install runtime deps
 	pip install -r requirements.txt
 
-install-dev:
+install-dev: ## Install runtime + dev deps
 	pip install -r requirements.txt -r requirements-dev.txt
 
-# -------- App run --------
-dev:
+dev: ## Run FastAPI in dev mode
 	uvicorn app.main:app --reload
 
-# -------- Testing --------
-test:
+test: ## Run pytest with coverage (threshold is set in pyproject)
 	pytest
 
-# -------- Lint & Format --------
-lint:
+coverage: ## Generate HTML coverage report in htmlcov/
+	pytest --cov=app --cov-report=html
+
+lint: ## Run linters
 	ruff check .
 	black --check .
 	isort --check-only .
 
-fmt:
+fmt: ## Auto-format code
 	ruff check . --fix
 	black .
 	isort .
 
-# -------- Alembic --------
-migrate-new:
+migrate-new: ## Create new Alembic migration, pass m="message"
 	@if [ -z "$(m)" ]; then echo "Usage: make migrate-new m='message'"; exit 1; fi
 	alembic revision --autogenerate -m "$(m)"
 
-migrate-up:
+migrate-up: ## Apply latest migrations
 	alembic upgrade head
 
-migrate-down:
+migrate-down: ## Roll back one migration
 	alembic downgrade -1
 
-# -------- Docker Compose --------
-up:
+up: ## Start Docker Compose (API + DB)
 	docker compose up -d
 
-down:
+down: ## Stop and remove Docker Compose
 	docker compose down -v
 
-logs:
+logs: ## Tail Docker logs
 	docker compose logs -f
 
-# -------- Helper --------
-help:
-	@echo "Available targets:"
+help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' Makefile | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'

@@ -9,11 +9,8 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
     env:
-      # Let Alembic and tests import your package (app/)
       PYTHONPATH: ${{ github.workspace }}
-      # Default DB for CI steps
       DATABASE_URL: sqlite:///./dev.db
 
     steps:
@@ -45,9 +42,14 @@ jobs:
           isort --check-only .
 
       - name: Alembic upgrade (SQLite)
-        run: |
-          alembic upgrade head
+        run: alembic upgrade head
 
-      - name: Run tests
-        run: |
-          pytest -q
+      - name: Run tests (with coverage)
+        run: pytest
+
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: ./.coverage
