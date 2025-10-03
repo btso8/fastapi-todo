@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -11,33 +12,31 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, create_engine, select
 
 from app.json_logging import setup_dual_logging
-
-# Your ORM model lives here
+from app.migrate_on_startup import run_migrations_if_enabled
 from app.models import Task
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Logging setup
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 setup_dual_logging()
 logger = logging.getLogger("app")
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 # DB setup
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
 engine = create_engine(DATABASE_URL, echo=False)
 
 
 def get_session():
-    """FastAPI dependency that YIELDS a live SQLModel/SQLAlchemy Session."""
     with Session(engine) as session:
         yield session
 
 
-# -----------------------------------------------------------------------------
-# Pydantic I/O models (DTOs)
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Pydantic DTOs
+# -------------------------------------------------------------------
 class TaskIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=2000)
@@ -49,15 +48,25 @@ class TaskOut(TaskIn):
     completed: bool
 
 
-# -----------------------------------------------------------------------------
-# App + routes
-# -----------------------------------------------------------------------------
-app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)")
+# -------------------------------------------------------------------
+# Lifespan: run migrations before serving
+# -------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    run_migrations_if_enabled()
+    yield
 
+
+app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)", lifespan=lifespan)
+
+# Instrumentation
 instrumentator = Instrumentator().instrument(app)
 instrumentator.expose(app, include_in_schema=False)
 
 
+# -------------------------------------------------------------------
+# Middleware + routes
+# -------------------------------------------------------------------
 @app.middleware("http")
 async def log_requests(request, call_next):
     from time import perf_counter
@@ -100,17 +109,14 @@ def list_tasks(
 ):
     stmt = select(Task)
     items = session.exec(stmt).all()
-
     if search:
         s = search.lower()
         items = [
             t
             for t in items
-            if (
-                s in (t.title or "").lower()
-                or s in (t.description or "").lower()
-                or s in (t.tag or "").lower()
-            )
+            if s in (t.title or "").lower()
+            or s in (t.description or "").lower()
+            or s in (t.tag or "").lower()
         ]
     if tag is not None:
         items = [t for t in items if t.tag == tag]
