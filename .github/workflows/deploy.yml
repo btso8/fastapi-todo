@@ -1,0 +1,76 @@
+name: CI (PR) + Deploy (main)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # for OIDC -> AWS STS
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REGISTRY: 975705622152.dkr.ecr.eu-west-2.amazonaws.com
+  ECR_REPOSITORY: btso8/fastapi-todo
+  IMAGE_URI: 975705622152.dkr.ecr.eu-west-2.amazonaws.com/btso8/fastapi-todo
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt') }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          [ -f requirements-test.txt ] && pip install -r requirements-test.txt || true
+
+      - name: Run pytest
+        run: pytest -q
+
+  deploy:
+    name: Build → Push to ECR → (Auto)Deploy App Runner
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::975705622152:role/GithubActionsECRPushRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          GIT_SHA=${{ github.sha }}
+          docker build -t $IMAGE_URI:latest -t $IMAGE_URI:$GIT_SHA .
+
+      - name: Push image tags
+        run: |
+          docker push $IMAGE_URI:latest
+          docker push $IMAGE_URI:${{ github.sha }}
