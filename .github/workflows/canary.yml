@@ -1,0 +1,57 @@
+name: Canary Health & CRUD
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  TIMEOUT: "15"
+  RETRIES: "2"
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ secrets.APP_URL }}
+      TASKS_PATH: ${{ secrets.CANARY_TASKS_PATH }}
+      ENABLE_CRUD: ${{ secrets.CANARY_ENABLE_CRUD }}
+      AUTH_HEADER: ${{ secrets.CANARY_AUTH_HEADER }}
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ -z "$BASE_URL" ]; then
+            echo "APP_URL secret is required"; exit 1
+          fi
+          echo "Base URL: $BASE_URL"
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -m "$TIMEOUT" -o /dev/null -w "%{http_code}" "$BASE_URL/health")
+          echo "Health code: $code"
+          test "$code" = "200"
+
+      - name: Optional CRUD smoke
+        if: env.ENABLE_CRUD == 'true'
+        run: |
+          set -euo pipefail
+          PATH_PART=${TASKS_PATH:-/tasks}
+          TS=$(date +%s)
+          HDRS=("-H" "Content-Type: application/json")
+          if [ -n "${AUTH_HEADER:-}" ]; then
+            HDRS+=("-H" "$AUTH_HEADER")
+          fi
+
+          create_resp=$(curl -sS -m "$TIMEOUT" -X POST "${BASE_URL}${PATH_PART}" "${HDRS[@]}"             -d "{"title":"canary-$TS","completed":false}")
+          echo "Create resp: $create_resp"
+          id=$(echo "$create_resp" | python -c "import sys, json; print(json.load(sys.stdin).get('id',''))")
+          if [ -z "$id" ]; then echo "No id returned from create"; exit 1; fi
+
+          code=$(curl -sS -m "$TIMEOUT" -o /dev/null -w "%{http_code}" "${BASE_URL}${PATH_PART}/${id}")
+          echo "Read code: $code"; test "$code" = "200"
+
+          curl -sS -m "$TIMEOUT" -X DELETE "${BASE_URL}${PATH_PART}/${id}" "${HDRS[@]}" -o /dev/null -w "%{http_code}"

@@ -1,0 +1,28 @@
+{
+  "AlarmName": "apprunner-latency-p90-high",
+  "AlarmDescription": "App Runner p90 RequestLatency high",
+  "ComparisonOperator": "GreaterThanThreshold",
+  "EvaluationPeriods": 3,
+  "Threshold": 300.0,
+  "TreatMissingData": "notBreaching",
+  "Metrics": [
+    {
+      "Id": "m_latency_p90",
+      "MetricStat": {
+        "Metric": {
+          "Namespace": "AWS/AppRunner",
+          "MetricName": "RequestLatency",
+          "Dimensions": [
+            {
+              "Name": "ServiceName",
+              "Value": "REPLACE_SERVICE_NAME"
+            }
+          ]
+        },
+        "Period": 60,
+        "Stat": "p90"
+      },
+      "ReturnData": true
+    }
+  ]
+}

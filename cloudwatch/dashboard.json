@@ -1,0 +1,156 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/AppRunner",
+            "Requests",
+            "ServiceName",
+            "apprunner-todo",
+            {
+              "stat": "Sum"
+            }
+          ],
+          [
+            ".",
+            "2xxStatusResponses",
+            ".",
+            ".",
+            {
+              "stat": "Sum"
+            }
+          ],
+          [
+            ".",
+            "4xxStatusResponses",
+            ".",
+            ".",
+            {
+              "stat": "Sum"
+            }
+          ],
+          [
+            ".",
+            "5xxStatusResponses",
+            ".",
+            ".",
+            {
+              "stat": "Sum"
+            }
+          ]
+        ],
+        "period": 60,
+        "region": "eu-west-2",
+        "title": "Requests and Status Codes (per minute)",
+        "view": "timeSeries",
+        "stacked": false,
+        "yAxis": {
+          "left": {
+            "label": "Count"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/AppRunner",
+            "RequestLatency",
+            "ServiceName",
+            "apprunner-todo",
+            {
+              "stat": "p90"
+            }
+          ]
+        ],
+        "period": 60,
+        "region": "eu-west-2",
+        "title": "RequestLatency p90 (ms)",
+        "view": "timeSeries",
+        "yAxis": {
+          "left": {
+            "label": "ms"
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/AppRunner",
+            "CPUUtilization",
+            "ServiceName",
+            "apprunner-todo",
+            {
+              "stat": "Average"
+            }
+          ],
+          [
+            ".",
+            "MemoryUtilization",
+            ".",
+            ".",
+            {
+              "stat": "Average"
+            }
+          ]
+        ],
+        "period": 60,
+        "region": "eu-west-2",
+        "title": "CPU and Memory Utilization (%)",
+        "view": "timeSeries"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [
+            "AWS/AppRunner",
+            "Concurrency",
+            "ServiceName",
+            "apprunner-todo",
+            {
+              "stat": "Average"
+            }
+          ],
+          [
+            ".",
+            "ActiveInstances",
+            ".",
+            ".",
+            {
+              "stat": "Average"
+            }
+          ]
+        ],
+        "period": 60,
+        "region": "eu-west-2",
+        "title": "Concurrency & Active Instances",
+        "view": "timeSeries"
+      }
+    }
+  ]
+}

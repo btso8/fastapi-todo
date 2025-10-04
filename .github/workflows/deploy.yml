@@ -53,24 +53,34 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
+    env:
+      SERVICE_ARN: ${{ secrets.APP_RUNNER_SERVICE_ARN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::975705622152:role/GithubActionsECRPushRole
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker image
+      - name: Build & push Docker image
         run: |
-          GIT_SHA=${{ github.sha }}
-          docker build -t $IMAGE_URI:latest -t $IMAGE_URI:$GIT_SHA .
+          set -euo pipefail
+          GIT_SHA="${{ github.sha }}"
+          docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$GIT_SHA" .
+          docker push "$IMAGE_URI:latest"
+          docker push "$IMAGE_URI:$GIT_SHA"
 
-      - name: Push image tags
+      - name: Install AWS CLI (for App Runner command)
         run: |
-          docker push $IMAGE_URI:latest
-          docker push $IMAGE_URI:${{ github.sha }}
+          curl -sSLo awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Trigger App Runner deployment (optional)
+        if: env.SERVICE_ARN != ''
+        run: aws apprunner start-deployment --service-arn "$SERVICE_ARN"

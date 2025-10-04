@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_fastapi_instrumentator.metrics import default, http_requests_total, latency
+from prometheus_fastapi_instrumentator.metrics import requests as reqs_inprogress
 from pydantic import BaseModel, Field
 from sqlmodel import Session, create_engine, select
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from app.json_logging import setup_dual_logging
 from app.migrate_on_startup import run_migrations_if_enabled
@@ -49,6 +55,28 @@ class TaskOut(TaskIn):
 
 
 # -------------------------------------------------------------------
+# Request ID middleware (adds x-request-id + context var)
+# -------------------------------------------------------------------
+_request_id_ctx = contextvars.ContextVar("request_id", default=None)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        rid = request.headers.get("x-request-id") or str(uuid.uuid4())
+        token = _request_id_ctx.set(rid)
+        try:
+            response = await call_next(request)
+        finally:
+            _request_id_ctx.reset(token)
+        response.headers["x-request-id"] = rid
+        return response
+
+
+def get_request_id() -> str:
+    return _request_id_ctx.get() or ""
+
+
+# -------------------------------------------------------------------
 # Lifespan: run migrations before serving
 # -------------------------------------------------------------------
 @asynccontextmanager
@@ -59,16 +87,30 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)", lifespan=lifespan)
 
-# Instrumentation
-instrumentator = Instrumentator().instrument(app)
-instrumentator.expose(app, include_in_schema=False)
+# -------------------------------------------------------------------
+# Observability: Prometheus metrics
+# -------------------------------------------------------------------
+# Use sensible defaults + extras (totals, latency histogram, in-progress)
+instrumentator = Instrumentator(
+    should_instrument_requests_inprogress=True,
+    excluded_handlers={"/metrics", "/health"},
+    should_respect_env_var=True,  # can disable with PROMETHEUS_INSTRUMENTATOR_DISABLED=true
+)
+instrumentator.add(default())
+instrumentator.add(http_requests_total())
+instrumentator.add(latency(buckets=(50, 100, 200, 300, 500, 1000, 2000, 5000)))
+instrumentator.add(reqs_inprogress())
+instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
+
+# Add request-id middleware (must be before routes to catch all)
+app.add_middleware(RequestIDMiddleware)
 
 
 # -------------------------------------------------------------------
 # Middleware + routes
 # -------------------------------------------------------------------
 @app.middleware("http")
-async def log_requests(request, call_next):
+async def log_requests(request: Request, call_next):
     from time import perf_counter
 
     start = perf_counter()
@@ -77,10 +119,12 @@ async def log_requests(request, call_next):
     logger.info(
         "request",
         extra={
+            "request_id": get_request_id(),
             "path": request.url.path,
             "method": request.method,
             "status_code": response.status_code,
             "duration_ms": round(duration_ms, 2),
+            "user_agent": request.headers.get("user-agent", ""),
         },
     )
     return response
