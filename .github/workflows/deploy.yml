@@ -8,14 +8,13 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  id-token: write   # for OIDC -> AWS STS
+  id-token: write   # for GitHub OIDC -> AWS STS
   contents: read
 
 env:
   AWS_REGION: eu-west-2
-  ECR_REGISTRY: 975705622152.dkr.ecr.eu-west-2.amazonaws.com
-  ECR_REPOSITORY: btso8/fastapi-todo
   IMAGE_URI: 975705622152.dkr.ecr.eu-west-2.amazonaws.com/btso8/fastapi-todo
+  SERVICE_NAME: apprunner-todo   # <-- set to your App Runner service name
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,6 +37,8 @@ jobs:
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
 
       - name: Install deps
         run: |
@@ -49,12 +50,10 @@ jobs:
         run: pytest -q
 
   deploy:
-    name: Build → Push to ECR → (Auto)Deploy App Runner
+    name: Build → Push → Deploy (SHA tag)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
-    env:
-      SERVICE_ARN: ${{ secrets.APP_RUNNER_SERVICE_ARN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,23 +63,57 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Who am I?
+        run: aws sts get-caller-identity
+
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & push Docker image
         run: |
           set -euo pipefail
-          GIT_SHA="${{ github.sha }}"
-          docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$GIT_SHA" .
+          SHORT_SHA="${GITHUB_SHA::7}"
+          docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$SHORT_SHA" .
           docker push "$IMAGE_URI:latest"
-          docker push "$IMAGE_URI:$GIT_SHA"
+          docker push "$IMAGE_URI:$SHORT_SHA"
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
 
-      - name: Install AWS CLI (for App Runner command)
+      - name: Resolve App Runner service ARN
         run: |
-          curl -sSLo awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
-          unzip -q awscliv2.zip
-          sudo ./aws/install --update
+          set -euo pipefail
+          REGION="${{ env.AWS_REGION }}"
+          NAME="${{ env.SERVICE_NAME }}"
+          ARN=$(aws apprunner list-services --region "$REGION" \
+            --query "ServiceSummaryList[?ServiceName=='$NAME'].ServiceArn" --output text)
+          if [ -z "$ARN" ] || ! echo "$ARN" | grep -Eq '^arn:aws:apprunner:'; then
+            echo "Service not found or invalid ARN for: $NAME"; exit 1
+          fi
+          echo "SERVICE_ARN=$ARN" >> "$GITHUB_ENV"
+          echo "Resolved SERVICE_ARN=$ARN"
 
-      - name: Trigger App Runner deployment (optional)
-        if: env.SERVICE_ARN != ''
-        run: aws apprunner start-deployment --service-arn "$SERVICE_ARN"
+      - name: Deploy SHA tag to App Runner
+        run: |
+          set -euo pipefail
+          REGION="${{ env.AWS_REGION }}"
+          IMAGE="${IMAGE_URI}:${SHORT_SHA}"
+          aws apprunner update-service \
+            --region "$REGION" \
+            --service-arn "$SERVICE_ARN" \
+            --source-configuration "ImageRepository={ImageIdentifier=${IMAGE},ImageRepositoryType=ECR,ImageConfiguration={Port=8000}}" \
+            >/dev/null
+
+      - name: Wait for RUNNING & show URL
+        run: |
+          set -e
+          REGION="${{ env.AWS_REGION }}"
+          for i in {1..60}; do
+            STATUS=$(aws apprunner describe-service --region "$REGION" --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "RUNNING" ]; then
+              URL=$(aws apprunner describe-service --region "$REGION" --service-arn "$SERVICE_ARN" --query 'Service.ServiceUrl' --output text)
+              echo "App URL: https://$URL"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for RUNNING"; exit 1
