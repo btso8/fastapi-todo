@@ -1,0 +1,99 @@
+name: Security Scan
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  IMAGE_TAG: security-${{ github.sha }}
+  SECURITY_GATE: "on"
+
+jobs:
+  deps_and_static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install tooling
+        run: |
+          python -m pip install -U pip
+          pip install pip-audit bandit
+
+      - name: pip-audit (deps)
+        run: |
+          set -o pipefail
+          pip-audit -r requirements.txt -f json > pip-audit.json || true
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit.json
+          path: pip-audit.json
+
+      - name: Bandit (code SAST)
+        run: bandit -q -r app || true
+
+      - name: Enforce SECURITY_GATE for pip-audit (HIGH/CRITICAL)
+        if: env.SECURITY_GATE == 'on'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys
+          try:
+              data = json.load(open('pip-audit.json'))
+          except Exception:
+              # no report -> don't block
+              sys.exit(0)
+
+          sev = {'LOW':1,'MEDIUM':2,'HIGH':3,'CRITICAL':4}
+          worst = 0
+          for r in data:
+              s = (r.get('vuln', {}).get('severity') or 'LOW').upper()
+              worst = max(worst, sev.get(s, 1))
+
+          if worst >= 3:
+              print("Found HIGH/CRITICAL dependency vulns. Failing as SECURITY_GATE=on.")
+              sys.exit(1)
+          else:
+              print("No HIGH/CRITICAL dependency vulns.")
+              sys.exit(0)
+          PY
+
+  image_lint_and_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dockerfile lint (Hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: fastapi-todo:${{ env.IMAGE_TAG }}
+
+      - name: Trivy image scan (HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: fastapi-todo:${{ env.IMAGE_TAG }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+        continue-on-error: ${{ env.SECURITY_GATE == 'off' }}

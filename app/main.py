@@ -18,6 +18,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from app.json_logging import setup_dual_logging
+from app.middleware_limits import MaxBodySizeMiddleware, SimpleRateLimitMiddleware
+from app.middleware_security import security_middlewares
 from app.migrate_on_startup import run_migrations_if_enabled
 from app.models import Task
 
@@ -87,22 +89,25 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)", lifespan=lifespan)
 
+for m in security_middlewares():
+    app.add_middleware(m.cls, **(m.options or {}))
+
 # -------------------------------------------------------------------
 # Observability: Prometheus metrics
 # -------------------------------------------------------------------
-# Use sensible defaults + extras (totals, latency histogram, in-progress)
 instrumentator = Instrumentator(
     should_instrument_requests_inprogress=True,
     excluded_handlers={"/metrics", "/health"},
-    should_respect_env_var=True,  # can disable with PROMETHEUS_INSTRUMENTATOR_DISABLED=true
+    should_respect_env_var=True,
 )
 instrumentator.add(default())
 instrumentator.add(latency(buckets=(50, 100, 200, 300, 500, 1000, 2000, 5000)))
 instrumentator.add(reqs_inprogress())
 instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
 
-# Add request-id middleware (must be before routes to catch all)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(MaxBodySizeMiddleware)
+app.add_middleware(SimpleRateLimitMiddleware)
 
 
 # -------------------------------------------------------------------

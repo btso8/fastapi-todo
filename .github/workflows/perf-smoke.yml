@@ -1,0 +1,19 @@
+name: Perf Smoke
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: k6 smoke (GET /health)
+        uses: grafana/k6-action@v0.2.0
+        with:
+          filename: k6/smoke.js
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
