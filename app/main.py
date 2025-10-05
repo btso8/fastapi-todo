@@ -34,7 +34,21 @@ logger = logging.getLogger("app")
 # -------------------------------------------------------------------
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
-engine = create_engine(DATABASE_URL, echo=False)
+
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+else:
+    POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+    MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+    engine = create_engine(
+        DATABASE_URL,
+        echo=False,
+        pool_size=POOL_SIZE,
+        max_overflow=MAX_OVERFLOW,
+        pool_recycle=POOL_RECYCLE,
+        pool_pre_ping=True,
+    )
 
 
 def get_session():
@@ -154,26 +168,28 @@ def create_task(body: TaskIn, session: Session = Depends(get_session)):
 
 @app.get("/tasks/", response_model=List[TaskOut])
 def list_tasks(
-    search: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None, description="Search in title/description/tag"),
     tag: Optional[str] = Query(default=None),
     completed: Optional[bool] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=int(os.getenv("DEFAULT_PAGE_SIZE", "50")), ge=1, le=500),
     session: Session = Depends(get_session),
 ):
     stmt = select(Task)
-    items = session.exec(stmt).all()
-    if search:
-        s = search.lower()
-        items = [
-            t
-            for t in items
-            if s in (t.title or "").lower()
-            or s in (t.description or "").lower()
-            or s in (t.tag or "").lower()
-        ]
     if tag is not None:
-        items = [t for t in items if t.tag == tag]
+        stmt = stmt.where(Task.tag == tag)
     if completed is not None:
-        items = [t for t in items if t.completed == completed]
+        stmt = stmt.where(Task.completed == completed)
+    if search:
+        s = f"%{search.lower()}%"
+        try:
+            stmt = stmt.where(
+                (Task.title.ilike(s)) | (Task.description.ilike(s)) | (Task.tag.ilike(s))
+            )
+        except Exception:
+            pass
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    items = session.exec(stmt).all()
     return items
 
 

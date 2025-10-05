@@ -1,0 +1,35 @@
+name: Performance
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  pr_smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: k6 smoke (very light)
+        uses: grafana/k6-action@v0.2.0
+        with:
+          filename: k6/smoke.js
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+
+  nightly_ramp:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: k6 ramp (p95<300ms, no failures)
+        uses: grafana/k6-action@v0.2.0
+        with:
+          filename: k6/ramp.js
+        env:
+          APP_URL: ${{ secrets.APP_URL }}

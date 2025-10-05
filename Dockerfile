@@ -1,25 +1,28 @@
 FROM python:3.12-slim AS base
+
+# Fast, quiet, no .pyc, unbuffered logs
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /app
 
-# System deps (optional): psycopg needs libpq at runtime if not using [binary]
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install runtime deps only
+# Install runtime deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Ensure pip is modern, then install your deps
+RUN python -m pip install --upgrade pip && \
+    pip install -r requirements.txt && \
+    pip install gunicorn uvicorn   # make sure server deps are present
 
 # App code
 COPY . .
 
-# Copy entrypoint script
+# Entrypoint script
 COPY entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
-# Env (FastAPI)
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+# Default worker count; override in App Runner env if needed
+ENV WEB_CONCURRENCY=2
 
 EXPOSE 8000
 CMD ["/app/entrypoint.sh"]
