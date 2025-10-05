@@ -11,7 +11,7 @@ permissions:
 env:
   PYTHON_VERSION: "3.12"
   IMAGE_TAG: security-${{ github.sha }}
-  SECURITY_GATE: "on"
+  SECURITY_GATE: "on"   # set to "off" to avoid failing while you remediate
 
 jobs:
   deps_and_static:
@@ -48,19 +48,48 @@ jobs:
         run: |
           python - <<'PY'
           import json, sys
-          try:
-              data = json.load(open('pip-audit.json'))
-          except Exception:
-              # no report -> don't block
+          from pathlib import Path
+
+          p = Path("pip-audit.json")
+          if not p.exists():
               sys.exit(0)
 
-          sev = {'LOW':1,'MEDIUM':2,'HIGH':3,'CRITICAL':4}
-          worst = 0
-          for r in data:
-              s = (r.get('vuln', {}).get('severity') or 'LOW').upper()
-              worst = max(worst, sev.get(s, 1))
+          raw = p.read_text().strip()
+          if not raw:
+              sys.exit(0)
 
-          if worst >= 3:
+          try:
+              data = json.loads(raw)
+          except Exception:
+              # not valid JSON (e.g., pip-audit printed a message)
+              sys.exit(0)
+
+          sev_order = {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}
+          worst = 0
+
+          def bump(sev):
+              nonlocal worst
+              if not sev: return
+              s = str(sev).upper()
+              worst = max(worst, sev_order.get(s, 0))
+
+          def scan_item(item):
+              # typical shape: {"name":..., "version":..., "vulns":[...]}
+              if isinstance(item, dict):
+                  vulns = item.get("vulns") or item.get("vulnerabilities") or []
+                  for v in vulns:
+                      bump(v.get("severity") or v.get("severity_name"))
+
+          if isinstance(data, list):
+              for item in data:
+                  scan_item(item)
+          elif isinstance(data, dict):
+              for item in data.get("dependencies", []):
+                  scan_item(item)
+              for v in data.get("vulnerabilities", []):
+                  bump(v.get("severity"))
+
+          if worst >= 3:  # HIGH or CRITICAL
               print("Found HIGH/CRITICAL dependency vulns. Failing as SECURITY_GATE=on.")
               sys.exit(1)
           else:
@@ -77,7 +106,7 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          failure-threshold: error
+          failure-threshold: error   # warnings won't fail (e.g., DL3008)
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
