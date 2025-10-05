@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: k6 smoke (very light)
-        uses: grafana/k6-action@v0.2.0
+        uses: grafana/k6-action@v0.3.1
         with:
           filename: k6/smoke.js
         env:
@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: k6 ramp (p95<300ms, no failures)
-        uses: grafana/k6-action@v0.2.0
+        uses: grafana/k6-action@v0.3.1
         with:
           filename: k6/ramp.js
         env:
