@@ -4,5 +4,5 @@ httpx==0.28.1
 anyio>=4.0
 ruff==0.6.9
 black==24.8.0
-isort==5.13.2
+isort==6.1.0
 pre-commit==3.8.0
