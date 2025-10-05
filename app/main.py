@@ -90,7 +90,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="FastAPI To-Do (SQLModel + Alembic)", lifespan=lifespan)
 
 for m in security_middlewares():
-    app.add_middleware(m.cls, **(m.options or {}))
+    opts = getattr(m, "options", None)
+    if opts is None:
+        opts = getattr(m, "kwargs", {})
+    app.add_middleware(m.cls, **opts)
+
 
 # -------------------------------------------------------------------
 # Observability: Prometheus metrics
