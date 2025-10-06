@@ -134,13 +134,19 @@ async def log_requests(request: Request, call_next):
 @app.middleware("http")
 async def relax_csp_for_docs(request: Request, call_next):
     resp = await call_next(request)
-    path = request.url.path
-    if path.startswith("/docs") or path.startswith("/redoc"):
+    p = request.url.path
+    if p.startswith("/docs"):
         resp.headers["Content-Security-Policy"] = (
             "default-src 'none'; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
-            "script-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+        )
+    elif p.startswith("/redoc"):
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'none'; connect-src 'self'; img-src 'self' data:; "
+            "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
         )
     return resp
