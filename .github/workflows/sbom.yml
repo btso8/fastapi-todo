@@ -24,7 +24,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Generate SPDX SBOM (Syft)
-        uses: anchore/sbom-action@v0.17.9
+        uses: anchore/sbom-action@v0.20.6
         with:
           image: fastapi-todo:sbom-${{ github.sha }}
           format: spdx-json
