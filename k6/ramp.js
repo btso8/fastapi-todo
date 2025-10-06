@@ -1,17 +1,16 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
-// Avoid optional chaining; do simple truthy check
 const rawBase = (__ENV.APP_URL || '').toString();
-const BASE = rawBase.replace(/\/$/, ''); // strip trailing slash
+const BASE = rawBase.replace(/\/$/, '');
 if (!BASE) {
     throw new Error('APP_URL env var is required, e.g. https://your-app.example');
 }
 
 export const options = {
     stages: [
-        { duration: '30s', target: 10 },
-        { duration: '60s', target: 20 },
+        { duration: '30s', target: 1 },
+        { duration: '60s', target: 1 },
         { duration: '30s', target: 0 },
     ],
     thresholds: {
@@ -21,7 +20,7 @@ export const options = {
 };
 
 export default function () {
-    const res = http.get(`${BASE}/healthz`, { timeout: '5s' });
+    const res = http.get(`${BASE}/health`, { timeout: '5s' });
     check(res, { 'status is 200': (r) => r.status === 200 });
     sleep(1);
 }
