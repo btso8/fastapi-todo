@@ -3,24 +3,36 @@ on:
   push: { branches: [ "main" ] }
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   sbom:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+
+      - name: Build image (local only, cached)
+        uses: docker/build-push-action@v6
         with:
           context: .
           load: true
           tags: fastapi-todo:sbom-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Generate SPDX SBOM (Syft)
         uses: anchore/sbom-action@v0.17.9
         with:
           image: fastapi-todo:sbom-${{ github.sha }}
           format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: sbom.spdx.json
+          name: sbom-${{ github.sha }}.spdx.json
           path: sbom.spdx.json
+          retention-days: 30
