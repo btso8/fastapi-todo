@@ -1,14 +1,14 @@
-# High error rate (4xx/5xx)
-**Signal:** Alarm `apprunner-error-rate-high`.
+# High error rate
+**Signal:** `apprunner-error-burn-fast` or `apprunner-error-burn-slow` ALARM.
 
 ## Triage
-- CloudWatch → Logs: sample 5xx stack traces.
-- Check recent deploy (CI) and DB status.
+- Logs: sample 5xx traces, note paths/request ids.
+- Check last deploy; DB health.
 
 ## Actions
-- If after deploy → **rollback** (see runbook).
-- If DB/network → restart connection pool, check creds/limits.
-- If 4xx spike only → check client changes/rate limiting.
+- Post-deploy? → rollback.
+- 4xx-only? → client changes, CORS/rate limiting.
+- Infra? → DB creds/limits/network.
 
-## Done when
-- Error rate < SLO budget (e.g., <1% for 3 consecutive periods).
+## Exit
+- Error rate < threshold for two windows.

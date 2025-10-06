@@ -23,15 +23,9 @@ from app.middleware_security import security_middlewares
 from app.migrate_on_startup import run_migrations_if_enabled
 from app.models import Task
 
-# -------------------------------------------------------------------
-# Logging setup
-# -------------------------------------------------------------------
 setup_dual_logging()
 logger = logging.getLogger("app")
 
-# -------------------------------------------------------------------
-# DB setup
-# -------------------------------------------------------------------
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
 
@@ -56,9 +50,6 @@ def get_session():
         yield session
 
 
-# -------------------------------------------------------------------
-# Pydantic DTOs
-# -------------------------------------------------------------------
 class TaskIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, max_length=2000)
@@ -70,9 +61,6 @@ class TaskOut(TaskIn):
     completed: bool
 
 
-# -------------------------------------------------------------------
-# Request ID middleware (adds x-request-id + context var)
-# -------------------------------------------------------------------
 _request_id_ctx = contextvars.ContextVar("request_id", default=None)
 
 
@@ -92,9 +80,6 @@ def get_request_id() -> str:
     return _request_id_ctx.get() or ""
 
 
-# -------------------------------------------------------------------
-# Lifespan: run migrations before serving
-# -------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations_if_enabled()
@@ -110,9 +95,6 @@ for m in security_middlewares():
     app.add_middleware(m.cls, **opts)
 
 
-# -------------------------------------------------------------------
-# Observability: Prometheus metrics
-# -------------------------------------------------------------------
 instrumentator = Instrumentator(
     should_instrument_requests_inprogress=True,
     excluded_handlers={"/metrics", "/health"},
@@ -128,9 +110,6 @@ app.add_middleware(MaxBodySizeMiddleware)
 app.add_middleware(SimpleRateLimitMiddleware)
 
 
-# -------------------------------------------------------------------
-# Middleware + routes
-# -------------------------------------------------------------------
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     from time import perf_counter

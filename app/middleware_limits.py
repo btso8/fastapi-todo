@@ -5,11 +5,10 @@ from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-MAX_BYTES = int(os.getenv("MAX_BODY_BYTES", "1048576"))  # 1 MiB default
+MAX_BYTES = int(os.getenv("MAX_BODY_BYTES", "1048576"))
 WINDOW_SECS = int(os.getenv("RL_WINDOW_SECS", "60"))
 MAX_REQS = int(os.getenv("RL_MAX_REQS", "120"))
 
-# simple in-process counter (per instance)
 _buckets = {}
 
 

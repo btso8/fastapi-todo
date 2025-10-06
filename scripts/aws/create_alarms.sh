@@ -1,110 +1,61 @@
-REGION=eu-west-2
-SERVICE=apprunner-todo
-TOPIC_ARN=arn:aws:sns:eu-west-2:975705622152:apprunner-alerts  # or leave blank
+#!/usr/bin/env bash
+set -euo pipefail
+# Create basic App Runner alarms (error rate %, p90 latency).
+# Usage: create_alarms.sh <service_name> <region> [sns_topic_arn]
+SVC="${1:?service name required}"
+REGION="${2:?region required}"
+SNS="${3:-}"
 
-# Create temp folder
-TMP=$(mktemp -d)
-cd "$TMP"
+echo "Creating/Updating alarms in $REGION for $SVC"
 
-# Error-rate alarm JSON (metric math: (4xx+5xx)/Requests * 100)
-cat > error_rate_alarm.json <<'JSON'
+tmpdir=$(mktemp -d)
+
+# Error rate % over 5 minutes (>1%)
+cat > "$tmpdir/error_rate.json" <<JSON
 {
   "AlarmName": "apprunner-error-rate-high",
-  "AlarmDescription": "App Runner error rate > threshold",
+  "AlarmDescription": "Error rate (4xx+5xx)/Requests > 1% (5m)",
   "ComparisonOperator": "GreaterThanThreshold",
-  "EvaluationPeriods": 3,
+  "EvaluationPeriods": 5,
   "Threshold": 1.0,
   "TreatMissingData": "notBreaching",
   "Metrics": [
-    {
-      "Id": "m_requests",
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "AWS/AppRunner",
-          "MetricName": "Requests",
-          "Dimensions": [{ "Name": "ServiceName", "Value": "REPLACE_SERVICE_NAME" }]
-        },
-        "Period": 60,
-        "Stat": "Sum"
-      },
-      "ReturnData": false
-    },
-    {
-      "Id": "m_4xx",
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "AWS/AppRunner",
-          "MetricName": "4xxStatusResponses",
-          "Dimensions": [{ "Name": "ServiceName", "Value": "REPLACE_SERVICE_NAME" }]
-        },
-        "Period": 60,
-        "Stat": "Sum"
-      },
-      "ReturnData": false
-    },
-    {
-      "Id": "m_5xx",
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "AWS/AppRunner",
-          "MetricName": "5xxStatusResponses",
-          "Dimensions": [{ "Name": "ServiceName", "Value": "REPLACE_SERVICE_NAME" }]
-        },
-        "Period": 60,
-        "Stat": "Sum"
-      },
-      "ReturnData": false
-    },
-    {
-      "Id": "e_error_rate",
-      "Expression": "(m_4xx + m_5xx) / IF(m_requests, m_requests, 1) * 100",
-      "Label": "ErrorRatePercent",
-      "ReturnData": true
-    }
+    { "Id":"req","MetricStat":{"Metric":{"Namespace":"AWS/AppRunner","MetricName":"Requests","Dimensions":[{"Name":"ServiceName","Value":"$SVC"}]},"Period":60,"Stat":"Sum"},"ReturnData":false},
+    { "Id":"m4","MetricStat":{"Metric":{"Namespace":"AWS/AppRunner","MetricName":"4xxStatusResponses","Dimensions":[{"Name":"ServiceName","Value":"$SVC"}]},"Period":60,"Stat":"Sum"},"ReturnData":false},
+    { "Id":"m5","MetricStat":{"Metric":{"Namespace":"AWS/AppRunner","MetricName":"5xxStatusResponses","Dimensions":[{"Name":"ServiceName","Value":"$SVC"}]},"Period":60,"Stat":"Sum"},"ReturnData":false},
+    { "Id":"er","Expression":"(m4 + m5) / IF(req, req, 1) * 100","Label":"ErrorRatePercent","ReturnData":true}
   ]
 }
 JSON
 
-# p90 latency alarm JSON
-cat > latency_p90_alarm.json <<'JSON'
+# p90 latency > 300ms over 5 minutes
+cat > "$tmpdir/latency_p90.json" <<JSON
 {
   "AlarmName": "apprunner-latency-p90-high",
-  "AlarmDescription": "App Runner p90 RequestLatency high",
+  "AlarmDescription": "RequestLatency p90 > 300ms (5m)",
   "ComparisonOperator": "GreaterThanThreshold",
-  "EvaluationPeriods": 3,
+  "EvaluationPeriods": 5,
   "Threshold": 300.0,
   "TreatMissingData": "notBreaching",
   "Metrics": [
-    {
-      "Id": "m_latency_p90",
-      "MetricStat": {
-        "Metric": {
-          "Namespace": "AWS/AppRunner",
-          "MetricName": "RequestLatency",
-          "Dimensions": [{ "Name": "ServiceName", "Value": "REPLACE_SERVICE_NAME" }]
-        },
-        "Period": 60,
-        "Stat": "p90"
-      },
-      "ReturnData": true
-    }
+    { "Id":"lat","MetricStat":{"Metric":{"Namespace":"AWS/AppRunner","MetricName":"RequestLatency","Dimensions":[{"Name":"ServiceName","Value":"$SVC"}]},"Period":60,"Stat":"p90"},"ReturnData":true}
   ]
 }
 JSON
 
-# Inject your service name
-sed -i "s/REPLACE_SERVICE_NAME/${SERVICE}/g" error_rate_alarm.json latency_p90_alarm.json
+put_alarm() {
+  local file="$1"
+  if [ -n "$SNS" ]; then
+    aws cloudwatch put-metric-alarm --region "$REGION" \
+      --cli-input-json "file://$file" \
+      --alarm-actions "$SNS" --ok-actions "$SNS"
+  else
+    aws cloudwatch put-metric-alarm --region "$REGION" \
+      --cli-input-json "file://$file"
+  fi
+}
 
-# Create the alarms (with optional SNS actions if you set TOPIC_ARN)
-if [ -n "$TOPIC_ARN" ]; then
-  aws cloudwatch put-metric-alarm --region "$REGION" \
-    --cli-input-json file://latency_p90_alarm.json \
-    --alarm-actions "$TOPIC_ARN" --ok-actions "$TOPIC_ARN"
+put_alarm "$tmpdir/error_rate.json"
+put_alarm "$tmpdir/latency_p90.json"
 
-  aws cloudwatch put-metric-alarm --region "$REGION" \
-    --cli-input-json file://error_rate_alarm.json \
-    --alarm-actions "$TOPIC_ARN" --ok-actions "$TOPIC_ARN"
-else
-  aws cloudwatch put-metric-alarm --region "$REGION" --cli-input-json file://latency_p90_alarm.json
-  aws cloudwatch put-metric-alarm --region "$REGION" --cli-input-json file://error_rate_alarm.json
-fi
+echo "Done: apprunner-error-rate-high, apprunner-latency-p90-high"

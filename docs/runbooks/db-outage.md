@@ -1,14 +1,14 @@
 # DB outage / connectivity
-**Signal:** 5xx bursts with DB errors.
+**Signal:** bursts of 5xx with DB errors.
 
 ## Triage
-- App logs for connection errors.
-- DB status/endpoint, creds, security groups.
+- App logs: connection errors/timeouts.
+- DB status: endpoint, creds, limits, SG rules.
 
 ## Actions
-- Fail closed: ensure health endpoint reflects DB readiness.
-- Restore DB / rotate creds.
-- Redeploy if needed to pick up new secrets.
+- Ensure /health reflects DB readiness.
+- Restore DB / rotate secrets.
+- Redeploy if needed to pick up secrets.
 
-## Done when
-- Health 200; errors back to baseline; latency normal.
+## Exit
+- Health 200; error rate normalized.

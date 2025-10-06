@@ -9,7 +9,7 @@ from alembic import command
 from alembic.config import Config
 
 log = logging.getLogger(__name__)
-LOCK_KEY = 777_777_777  # arbitrary int for advisory lock
+LOCK_KEY = 777_777_777
 
 
 def _engine() -> Engine:

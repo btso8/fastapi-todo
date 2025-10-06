@@ -1,8 +1,8 @@
-# Incident comms
+# Incident communications
 **Who:** on-call + owner
-**Where:** <your chat channel> / Status page
+**Where:** <your channel> / status page
 
 ## Template
-- Start: <time UTC>, impact, symptoms, current status.
-- Updates: every 15–30 min or on major change.
-- End: resolution, cause (prelim), follow-ups, preventions.
+- Start: UTC time, scope, symptoms, current status.
+- Updates: every 15–30 min or on change.
+- End: resolution, preliminary cause, follow-ups/preventions.

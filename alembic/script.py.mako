@@ -10,7 +10,6 @@ import sqlalchemy as sa
 import sqlmodel
 ${imports if imports else ""}
 
-# revision identifiers, used by Alembic.
 revision = ${repr(up_revision)}
 down_revision = ${repr(down_revision) if down_revision else None}
 branch_labels = ${repr(branch_labels) if branch_labels else None}

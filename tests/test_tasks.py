@@ -51,17 +51,14 @@ def test_filters_search_tag_completed(test_client):
     t3 = test_client.post("/tasks/", json={"title": "Gamma done", "tag": "beta"}).json()
     test_client.patch(f"/tasks/{t3['id']}/complete")
 
-    # search
     r = test_client.get("/tasks/?search=beta")
     assert r.status_code == 200
     titles = {t["title"] for t in r.json()}
     assert titles == {"Beta work", "Gamma done"}
 
-    # tag filter
     r = test_client.get("/tasks/?tag=alpha")
     assert {t["tag"] for t in r.json()} == {"alpha"}
 
-    # completed filter
     r = test_client.get("/tasks/?completed=true")
     assert all(t["completed"] is True for t in r.json())
 
@@ -73,6 +70,5 @@ def test_404s_and_validation(test_client):
     r = test_client.put("/tasks/999999", json={"title": "X", "description": "Y"})
     assert r.status_code == 404
 
-    # validation: title required
     r = test_client.post("/tasks/", json={"description": "no title"})
     assert r.status_code in (400, 422)

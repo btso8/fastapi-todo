@@ -11,24 +11,18 @@ from sqlmodel import SQLModel
 
 from alembic import context
 
-# -------------------------------------------------------------
-# Load .env and ensure 'app' package is importable
-# -------------------------------------------------------------
 load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Optional: src/ layout
 SRC_DIR = PROJECT_ROOT / "src"
 if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-# Import models so they register on SQLModel.metadata
 from app import models  # noqa: E402,F401
 
-# Alembic config + logging
 config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
