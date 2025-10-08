@@ -33,6 +33,12 @@ jobs:
       - name: Who am I (sanity)
         run: aws sts get-caller-identity
 
+      # ✅ Add Terraform to the runner
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
+
       - name: Terraform outputs (ECR, cluster, service)
         working-directory: ./terraform
         run: |
@@ -69,10 +75,10 @@ jobs:
 
       - name: Blue/green update to new image
         env:
-          CLUSTER:  ${{ steps.parse.outputs.cluster }}
-          SERVICE:  ${{ steps.parse.outputs.service }}
+          CLUSTER:   ${{ steps.parse.outputs.cluster }}
+          SERVICE:   ${{ steps.parse.outputs.service }}
           CONTAINER: ${{ env.CONTAINER_NAME }}
-          NEW_IMAGE: "${{ steps.parse.outputs.repo }}:latest"
+          NEW_IMAGE: ${{ steps.parse.outputs.repo }}:latest
         run: |
           set -euo pipefail
           TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
