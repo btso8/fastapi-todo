@@ -16,6 +16,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,41 +30,76 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_GITHUB_OIDC_ROLE_ARN }}
 
+      - name: Who am I (sanity)
+        run: aws sts get-caller-identity
+
       - name: Terraform outputs (ECR, cluster, service)
-        working-directory: ./terraform-ecs
+        working-directory: ./terraform
         run: |
+          set -euo pipefail
           terraform init -input=false
           terraform output -json > tf_outputs.json
           cat tf_outputs.json
 
       - name: Parse outputs
         id: parse
-        working-directory: ./terraform-ecs
+        working-directory: ./terraform
         run: |
-          echo "repo=$(jq -r '.ecr_repository_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-          echo "cluster=$(jq -r '.cluster_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-          echo "service=$(jq -r '.service_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          echo "repo=$(jq -r '.ecr_repository_url.value' tf_outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "cluster=$(jq -r '.cluster_name.value' tf_outputs.json)"     >> "$GITHUB_OUTPUT"
+          echo "service=$(jq -r '.service_name.value' tf_outputs.json)"     >> "$GITHUB_OUTPUT"
 
-      - name: Build & push image
+      - name: Login to ECR
         env:
           REPO: ${{ steps.parse.outputs.repo }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin "$(echo "$REPO" | awk -F/ '{print $1}')"
+
+      - name: Build & push image
+        env:
+          REPO: ${{ steps.parse.outputs.repo }}
+        run: |
+          set -euo pipefail
           docker build -t "$REPO:latest" .
-          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$(echo "$REPO" | awk -F/ '{print $1}')"
           docker push "$REPO:latest"
 
       - name: Blue/green update to new image
         env:
+          CLUSTER:  ${{ steps.parse.outputs.cluster }}
+          SERVICE:  ${{ steps.parse.outputs.service }}
+          CONTAINER: ${{ env.CONTAINER_NAME }}
+          NEW_IMAGE: "${{ steps.parse.outputs.repo }}:latest"
+        run: |
+          set -euo pipefail
+          TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+                   --query "services[0].taskDefinition" --output text)
+
+          aws ecs describe-task-definition --task-definition "$TD_ARN" \
+            --query "taskDefinition" > td.json
+
+          jq --arg name "$CONTAINER" --arg image "$NEW_IMAGE" '
+            .containerDefinitions |= (map(if .name==$name then .image=$image else . end)) |
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,
+                .registeredAt,.registeredBy)
+          ' td.json > new-td.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-td.json \
+            --query "taskDefinition.taskDefinitionArn" --output text)
+
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+                                 --task-definition "$NEW_TD_ARN"
+
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: Show final service status
+        env:
           CLUSTER: ${{ steps.parse.outputs.cluster }}
           SERVICE: ${{ steps.parse.outputs.service }}
-          CONTAINER: ${{ env.CONTAINER_NAME }}
-          NEW_IMAGE: ${{ steps.parse.outputs.repo }}:latest
         run: |
-          TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query "services[0].taskDefinition" --output text)
-          TD_JSON=$(aws ecs describe-task-definition --task-definition "$TD_ARN" --query "taskDefinition")
-          echo "$TD_JSON" | jq --arg name "$CONTAINER" --arg image "$NEW_IMAGE"             '.containerDefinitions |= (map(if .name==$name then .image=$image else . end)) |
-             del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' > new-td.json
-          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://new-td.json --query "taskDefinition.taskDefinitionArn" --output text)
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TD_ARN"
-          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].{taskDefinition:taskDefinition,desired:desiredCount,running:runningCount,pending:pendingCount,events:events[:3]}'
