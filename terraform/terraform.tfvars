@@ -22,3 +22,5 @@ db_name     = "todo"
 # extra_env = {
 #   FEATURE_FLAG = "on"
 # }
+
+container_image = "960096061391.dkr.ecr.eu-west-2.amazonaws.com/fastapi-todo:latest"
