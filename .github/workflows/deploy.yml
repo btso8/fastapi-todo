@@ -55,7 +55,7 @@ jobs:
         working-directory: ./terraform
         run: |
           set -euo pipefail
-          terraform init -input=false
+          terraform init -input=false -no-color
           terraform output -json > tf_outputs.json
           cat tf_outputs.json
 
@@ -64,9 +64,24 @@ jobs:
         working-directory: ./terraform
         run: |
           set -euo pipefail
-          echo "repo=$(jq -r '.ecr_repository_url.value' tf_outputs.json)" >> "$GITHUB_OUTPUT"
-          echo "cluster=$(jq -r '.cluster_name.value' tf_outputs.json)"     >> "$GITHUB_OUTPUT"
-          echo "service=$(jq -r '.service_name.value' tf_outputs.json)"     >> "$GITHUB_OUTPUT"
+          repo=$(jq -r '.ecr_repository_url.value // empty' tf_outputs.json)
+          cluster=$(jq -r '.cluster_name.value // empty' tf_outputs.json)
+          service=$(jq -r '.service_name.value // empty' tf_outputs.json)
+
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
+
+          # Hard fail if any are empty to avoid REPO=null later
+          test -n "$repo" || { echo "::error::Missing ecr_repository_url in Terraform outputs"; exit 1; }
+          test -n "$cluster" || { echo "::error::Missing cluster_name in Terraform outputs"; exit 1; }
+          test -n "$service" || { echo "::error::Missing service_name in Terraform outputs"; exit 1; }
+
+      - name: Show parsed values (sanity)
+        run: |
+          echo "Repo:     ${{ steps.parse.outputs.repo }}"
+          echo "Cluster:  ${{ steps.parse.outputs.cluster }}"
+          echo "Service:  ${{ steps.parse.outputs.service }}"
 
       - name: Login to ECR
         env:
@@ -74,8 +89,10 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -euo pipefail
+          REGISTRY="$(echo "$REPO" | awk -F/ '{print $1}')"
+          echo "Logging in to: $REGISTRY"
           aws ecr get-login-password --region "$AWS_REGION" \
-          | docker login --username AWS --password-stdin "$(echo "$REPO" | awk -F/ '{print $1}')"
+          | docker login --username AWS --password-stdin "$REGISTRY"
 
       - name: Build & push image
         env:
