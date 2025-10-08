@@ -1,0 +1,14 @@
+project_name          = "fastapi-todo"
+environment           = "dev"
+region                = "eu-west-2"
+github_owner          = "btso8"
+github_repo           = "fastapi-todo"
+alert_email           = "brandonoliver@live.co.uk"
+db_username           = "todo"
+db_instance_class     = "db.t4g.micro"
+allocated_storage_gb  = 20
+use_private_ecr_image = false
+apprunner_port        = 8000
+apprunner_cpu         = "0.25 vCPU"
+apprunner_memory      = "0.5 GB"
+budget_monthly_limit  = 15

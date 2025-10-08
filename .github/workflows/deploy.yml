@@ -13,7 +13,10 @@ permissions:
 
 env:
   AWS_REGION: eu-west-2
-  IMAGE_URI: 975705622152.dkr.ecr.eu-west-2.amazonaws.com/btso8/fastapi-todo
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECR_REGISTRY:   ${{ secrets.ECR_REGISTRY }}
+  IMAGE_URI:      ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}
+  APP_RUNNER_SERVICE_ARN: ${{ secrets.APP_RUNNER_SERVICE_ARN }}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -42,14 +45,19 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          [ -f requirements-test.txt ] && pip install -r requirements-test.txt || true
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-test.txt ]; then pip install -r requirements-test.txt; fi
 
       - name: Run pytest
-        run: pytest -q
+        run: |
+          if [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -d tests ]; then
+            pytest -q
+          else
+            echo "No tests configured, skipping."
+          fi
 
   deploy:
-    name: Build → Push (auto-deploy by App Runner)
+    name: Build → Push → Update App Runner
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
@@ -59,7 +67,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
@@ -72,4 +80,11 @@ jobs:
           docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$SHORT_SHA" .
           docker push "$IMAGE_URI:$SHORT_SHA"
           docker push "$IMAGE_URI:latest"
-          echo "SHORT_SHA=$SHORT_SHA"
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+      - name: Update App Runner service to latest image
+        run: |
+          aws apprunner update-service \
+            --service-arn "$APP_RUNNER_SERVICE_ARN" \
+            --source-configuration "ImageRepository={ImageIdentifier=${IMAGE_URI}:latest,ImageRepositoryType=ECR,ImageConfiguration={Port=8000,RuntimeEnvironmentVariables=[{Name=UVICORN_WORKERS,Value=2}]}}" \
+            --region "$AWS_REGION"
