@@ -31,7 +31,6 @@ resource "aws_ecs_task_definition" "app" {
         { containerPort = var.container_port, protocol = "tcp" }
       ]
 
-      # App env + DATABASE_URL (to RDS) + any user-provided extras
       environment = concat(
         [
           { name = "APP_ENV", value = var.environment },

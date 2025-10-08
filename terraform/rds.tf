@@ -9,7 +9,6 @@ resource "aws_db_subnet_group" "app" {
   }
 }
 
-# Dedicated DB SG
 resource "aws_security_group" "db" {
   name        = "${local.name_prefix}-db-sg"
   description = "Allow Postgres from ECS service"
@@ -21,7 +20,6 @@ resource "aws_security_group" "db" {
   }
 }
 
-# allow ECS service -> DB on 5432
 resource "aws_vpc_security_group_ingress_rule" "db_from_ecs" {
   security_group_id            = aws_security_group.db.id
   referenced_security_group_id = aws_security_group.svc.id
@@ -31,7 +29,6 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_ecs" {
   description                  = "Postgres from ECS tasks"
 }
 
-# egress all from DB
 resource "aws_vpc_security_group_egress_rule" "db_all_out" {
   security_group_id = aws_security_group.db.id
   cidr_ipv4         = "0.0.0.0/0"

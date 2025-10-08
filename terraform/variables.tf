@@ -111,6 +111,12 @@ variable "github_ref" {
   default     = "refs/heads/main"
 }
 
+variable "github_sub_wildcard" {
+  type        = bool
+  description = "Also allow all refs for this repo (repo:owner/repo:*)"
+  default     = false
+}
+
 variable "oidc_role_name" {
   description = "Name of the IAM role to create for GitHub Actions"
   type        = string

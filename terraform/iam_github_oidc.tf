@@ -2,9 +2,11 @@ locals {
   create_oidc_role = var.enable_github_oidc_role
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_iam_openid_connect_provider" "github" {
   count = local.create_oidc_role ? 1 : 0
-  url   = "https://token.actions.githubusercontent.com"
+  arn   = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
 }
 
 data "aws_iam_policy_document" "github_oidc_trust" {
@@ -28,7 +30,10 @@ data "aws_iam_policy_document" "github_oidc_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_owner}/${var.github_repo}:ref:${var.github_ref}"]
+      values = concat(
+        ["repo:${var.github_owner}/${var.github_repo}:ref:${var.github_ref}"],
+        var.github_sub_wildcard ? ["repo:${var.github_owner}/${var.github_repo}:*"] : []
+      )
     }
   }
 }
@@ -36,8 +41,8 @@ data "aws_iam_policy_document" "github_oidc_trust" {
 resource "aws_iam_role" "github_actions_deployer" {
   count              = local.create_oidc_role ? 1 : 0
   name               = var.oidc_role_name
-  assume_role_policy = data.aws_iam_policy_document.github_oidc_trust[0].json
   description        = "GitHub Actions OIDC deployer for ECS/ECR"
+  assume_role_policy = data.aws_iam_policy_document.github_oidc_trust[0].json
 }
 
 data "aws_iam_policy_document" "ecs_ecr_min" {
@@ -53,13 +58,13 @@ data "aws_iam_policy_document" "ecs_ecr_min" {
     effect = "Allow"
     actions = [
       "ecr:GetAuthorizationToken",
+      "ecr:DescribeRepositories",
       "ecr:BatchCheckLayerAvailability",
-      "ecr:CompleteLayerUpload",
       "ecr:GetDownloadUrlForLayer",
       "ecr:InitiateLayerUpload",
-      "ecr:PutImage",
       "ecr:UploadLayerPart",
-      "ecr:DescribeRepositories"
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage"
     ]
     resources = ["*"]
   }
@@ -67,14 +72,14 @@ data "aws_iam_policy_document" "ecs_ecr_min" {
   statement {
     effect = "Allow"
     actions = [
-      "ecs:DescribeServices",
-      "ecs:DescribeTaskDefinition",
-      "ecs:RegisterTaskDefinition",
       "ecs:UpdateService",
+      "ecs:RegisterTaskDefinition",
+      "ecs:ListTasks",
       "ecs:ListTaskDefinitions",
       "ecs:ListServices",
-      "ecs:ListTasks",
-      "ecs:DescribeTasks"
+      "ecs:DescribeTasks",
+      "ecs:DescribeTaskDefinition",
+      "ecs:DescribeServices"
     ]
     resources = ["*"]
   }

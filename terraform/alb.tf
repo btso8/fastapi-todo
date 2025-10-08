@@ -1,4 +1,3 @@
-# Security group for ALB (allow 80 from internet)
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb-sg"
   description = "ALB security group"
@@ -10,9 +9,6 @@ resource "aws_security_group" "alb" {
   }
 }
 
-
-
-# Security group for Service (only ALB -> container port)
 resource "aws_security_group" "svc" {
   name        = "${local.name_prefix}-svc-sg"
   description = "Service security group"
@@ -23,8 +19,6 @@ resource "aws_security_group" "svc" {
     Env     = var.environment
   }
 }
-
-
 
 resource "aws_lb" "app_alb" {
   name               = "${local.name_prefix}-alb"

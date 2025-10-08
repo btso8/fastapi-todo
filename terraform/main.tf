@@ -12,7 +12,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Helpful naming locals
 locals {
   name_prefix = var.project_name
   image_uri   = var.container_image != "" ? var.container_image : "${aws_ecr_repository.app.repository_url}:latest"
