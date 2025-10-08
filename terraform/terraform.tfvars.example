@@ -7,8 +7,8 @@ environment  = "prod"
 aws_region   = "eu-west-2"
 
 # ECS sizing
-cpu           = 512
-memory        = 1024
+cpu    = 512
+memory = 1024
 desired_count = 1
 min_capacity  = 1
 max_capacity  = 4

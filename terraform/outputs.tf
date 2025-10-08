@@ -1,35 +1,23 @@
-output "region" {
-  value = var.region
+output "aws_region" {
+  value = var.aws_region
 }
 
-output "vpc_id" {
-  value = aws_vpc.main.id
+output "cluster_name" {
+  value = aws_ecs_cluster.this.name
+}
+
+output "service_name" {
+  value = aws_ecs_service.app.name
+}
+
+output "alb_dns_name" {
+  value = aws_lb.app_alb.dns_name
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.app.repository_url
 }
 
 output "rds_endpoint" {
-  value = aws_db_instance.pg.address
-}
-
-output "database_url_secret_arn" {
-  value = aws_secretsmanager_secret.database_url.arn
-}
-
-output "app_runner_service_url" {
-  value = aws_apprunner_service.app.service_url
-}
-
-output "app_runner_service_arn" {
-  value = aws_apprunner_service.app.arn
-}
-
-output "ecr_repository" {
-  value = aws_ecr_repository.app.name
-}
-
-output "ecr_registry" {
-  value = aws_ecr_repository.app.repository_url != "" ? split("/", aws_ecr_repository.app.repository_url)[0] : ""
-}
-
-output "deploy_role_arn" {
-  value = aws_iam_role.gha_deploy.arn
+  value = aws_db_instance.app.address
 }
