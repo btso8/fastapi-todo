@@ -2,7 +2,7 @@ name: Bootstrap + Deploy (ECS Fargate)
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch: {}
 
 permissions:
@@ -13,16 +13,12 @@ env:
   AWS_REGION: eu-west-2
   CONTAINER_NAME: fastapi-todo
   OIDC_ROLE_NAME: github-actions-oidc-ecs-deployer
-  TF_VAR_github_owner: btso8
-  TF_VAR_github_repo: fastapi-todo
-  TF_VAR_oidc_role_name: github-actions-oidc-ecs-deployer
 
 jobs:
   bootstrap-iam:
     runs-on: ubuntu-latest
     outputs:
       created: ${{ steps.check-role.outputs.created }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,29 +46,6 @@ jobs:
         with:
           terraform_version: 1.9.6
 
-      - name: Terraform init (bootstrap)
-        if: steps.check-role.outputs.created == 'true'
-        env:
-          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
-        working-directory: ./terraform
-        run: |
-          set -euxo pipefail
-          terraform init -input=false -no-color
-
-      - name: Import existing GitHub OIDC provider (if present)
-        if: steps.check-role.outputs.created == 'true'
-        env:
-          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
-          AWS_ACCOUNT_ID:        ${{ secrets.AWS_ACCOUNT_ID }}
-        working-directory: ./terraform
-        run: |
-          set -euo pipefail
-          terraform import \
-            aws_iam_openid_connect_provider.github \
-            arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com || true
-
       - name: Bootstrap OIDC provider + deploy role (Terraform)
         if: steps.check-role.outputs.created == 'true'
         env:
@@ -81,6 +54,7 @@ jobs:
         working-directory: ./terraform
         run: |
           set -euxo pipefail
+          terraform init -input=false -no-color
           terraform apply -input=false -auto-approve \
             -target=aws_iam_openid_connect_provider.github \
             -target=aws_iam_role.github_actions_deployer \
@@ -103,35 +77,16 @@ jobs:
       - name: Who am I
         run: aws sts get-caller-identity
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.6
-
-      - name: Terraform init/plan/apply (full infra)
-        working-directory: ./terraform
+      - name: Set deploy vars
+        id: setvars
         run: |
-          set -euxo pipefail
-          terraform init -input=false -no-color
-          terraform plan -input=false -no-color -out tfplan
-          terraform apply -input=false -auto-approve tfplan
-
-      - name: Capture outputs
-        id: tfout
-        working-directory: ./terraform
-        run: |
-          set -euo pipefail
-          terraform output -json > tf_outputs.json
-          repo=$(jq -r '.ecr_repository_url.value' tf_outputs.json)
-          cluster=$(jq -r '.cluster_name.value' tf_outputs.json)
-          service=$(jq -r '.service_name.value' tf_outputs.json)
-          echo "repo=$repo"       >> "$GITHUB_OUTPUT"
-          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
-          echo "service=$service" >> "$GITHUB_OUTPUT"
+          echo "repo=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/fastapi-todo" >> "$GITHUB_OUTPUT"
+          echo "cluster=fastapi-todo-cluster" >> "$GITHUB_OUTPUT"
+          echo "service=fastapi-todo-svc" >> "$GITHUB_OUTPUT"
 
       - name: Login to ECR
         env:
-          REPO: ${{ steps.tfout.outputs.repo }}
+          REPO: ${{ steps.setvars.outputs.repo }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -euo pipefail
@@ -142,7 +97,7 @@ jobs:
       - name: Build & push image
         id: buildpush
         env:
-          REPO: ${{ steps.tfout.outputs.repo }}
+          REPO: ${{ steps.setvars.outputs.repo }}
         run: |
           set -euo pipefail
           GIT_SHA="${GITHUB_SHA::7}"
@@ -153,10 +108,10 @@ jobs:
 
       - name: Update ECS service to new image
         env:
-          CLUSTER:   ${{ steps.tfout.outputs.cluster }}
-          SERVICE:   ${{ steps.tfout.outputs.service }}
+          CLUSTER:   ${{ steps.setvars.outputs.cluster }}
+          SERVICE:   ${{ steps.setvars.outputs.service }}
           CONTAINER: ${{ env.CONTAINER_NAME }}
-          NEW_IMAGE: ${{ steps.tfout.outputs.repo }}:${{ steps.buildpush.outputs.image_tag }}
+          NEW_IMAGE: ${{ steps.setvars.outputs.repo }}:${{ steps.buildpush.outputs.image_tag }}
         run: |
           set -euo pipefail
           TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query "services[0].taskDefinition" --output text)
@@ -168,3 +123,7 @@ jobs:
           NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://new-td.json --query "taskDefinition.taskDefinitionArn" --output text)
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TD_ARN"
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - name: Optional health check
+        run: |
+          echo "Hit your ALB: http://fastapi-todo-alb-1251451819.eu-west-2.elb.amazonaws.com/health"
