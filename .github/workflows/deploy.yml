@@ -30,7 +30,6 @@ jobs:
           OIDC_ROLE_NAME: ${{ env.OIDC_ROLE_NAME }}
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN:     ${{ secrets.AWS_BOOTSTRAP_SESSION_TOKEN }}
         run: |
           set -euo pipefail
           if aws iam get-role --role-name "$OIDC_ROLE_NAME" >/dev/null 2>&1; then
@@ -52,7 +51,6 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN:     ${{ secrets.AWS_BOOTSTRAP_SESSION_TOKEN }}
         working-directory: ./terraform
         run: |
           set -euxo pipefail
