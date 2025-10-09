@@ -153,16 +153,16 @@ async def relax_csp_for_docs(request: Request, call_next):
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "healthy"}
 
 
-# @app.post("/tasks/", response_model=TaskOut, status_code=201)
-# def create_task(body: TaskIn, session: Session = Depends(get_session)):
-#     task = Task(**body.model_dump())
-#     session.add(task)
-#     session.commit()
-#     session.refresh(task)
-#     return task
+@app.post("/tasks/", response_model=TaskOut, status_code=201)
+def create_task(body: TaskIn, session: Session = Depends(get_session)):
+    task = Task(**body.model_dump())
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+    return task
 
 
 @app.get("/tasks/", response_model=List[TaskOut])
