@@ -2,7 +2,7 @@ name: Bootstrap + Deploy (ECS Fargate)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch: {}
 
 permissions:
@@ -13,12 +13,16 @@ env:
   AWS_REGION: eu-west-2
   CONTAINER_NAME: fastapi-todo
   OIDC_ROLE_NAME: github-actions-oidc-ecs-deployer
+  TF_VAR_github_owner: btso8
+  TF_VAR_github_repo: fastapi-todo
+  TF_VAR_oidc_role_name: github-actions-oidc-ecs-deployer
 
 jobs:
   bootstrap-iam:
     runs-on: ubuntu-latest
     outputs:
       created: ${{ steps.check-role.outputs.created }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +50,7 @@ jobs:
         with:
           terraform_version: 1.9.6
 
-      - name: Bootstrap OIDC provider + deploy role (Terraform)
+      - name: Terraform init (bootstrap)
         if: steps.check-role.outputs.created == 'true'
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
@@ -55,9 +59,32 @@ jobs:
         run: |
           set -euxo pipefail
           terraform init -input=false -no-color
-          # Apply only the IAM bootstrap resources (no need to build VPC/ECS yet)
-          terraform apply -input=false -auto-approve -target=aws_iam_openid_connect_provider.github -target=aws_iam_role.github_actions_deployer -target=aws_iam_role_policy_attachment.deployer_admin
-          terraform output -json | jq .
+
+      - name: Import existing GitHub OIDC provider (if present)
+        if: steps.check-role.outputs.created == 'true'
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+          AWS_ACCOUNT_ID:        ${{ secrets.AWS_ACCOUNT_ID }}
+        working-directory: ./terraform
+        run: |
+          set -euo pipefail
+          terraform import \
+            aws_iam_openid_connect_provider.github \
+            arn:aws:iam::${AWS_ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com || true
+
+      - name: Bootstrap OIDC provider + deploy role (Terraform)
+        if: steps.check-role.outputs.created == 'true'
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+        working-directory: ./terraform
+        run: |
+          set -euxo pipefail
+          terraform apply -input=false -auto-approve \
+            -target=aws_iam_openid_connect_provider.github \
+            -target=aws_iam_role.github_actions_deployer \
+            -target=aws_iam_role_policy_attachment.deployer_admin
 
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -81,7 +108,7 @@ jobs:
         with:
           terraform_version: 1.9.6
 
-      - name: Terraform init/plan/apply
+      - name: Terraform init/plan/apply (full infra)
         working-directory: ./terraform
         run: |
           set -euxo pipefail
