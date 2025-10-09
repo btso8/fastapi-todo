@@ -1,4 +1,4 @@
-name: CI + Deploy (ECS Fargate)
+name: CI + Deploy
 
 on:
   push:
@@ -14,127 +14,120 @@ env:
   CONTAINER_NAME: fastapi-todo
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Inspect GitHub OIDC token (sub/aud)
-        id: inspect-oidc
-        uses: actions/github-script@v7
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            core.notice(`OIDC aud: ${payload.aud}`);
-            core.notice(`OIDC sub: ${payload.sub}`);
-            core.setOutput('aud', payload.aud);
-            core.setOutput('sub', payload.sub);
-
+          terraform_version: 1.9.5
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_GITHUB_OIDC_ROLE_ARN }}
 
-      - name: Who am I (sanity)
-        run: aws sts get-caller-identity
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.6
-
-      - name: Terraform outputs (ECR, cluster, service)
+      - name: Terraform init/plan/apply
         working-directory: ./terraform
         run: |
-          set -euo pipefail
+          set -euxo pipefail
+          terraform --version
           terraform init -input=false -no-color
-          terraform output -json > tf_outputs.json
-          cat tf_outputs.json
+          terraform validate -no-color
+          terraform plan -input=false -no-color -out tfplan
+          terraform apply -input=false -auto-approve tfplan
 
-      - name: Parse outputs
-        id: parse
+      - name: Capture Terraform outputs
+        id: tfout
         working-directory: ./terraform
         run: |
           set -euo pipefail
+          terraform output -json | tee tf_outputs.json
+          test "$(jq 'length' tf_outputs.json)" -gt 0 || { echo "::error::No Terraform outputs"; exit 1; }
+
           repo=$(jq -r '.ecr_repository_url.value // empty' tf_outputs.json)
           cluster=$(jq -r '.cluster_name.value // empty' tf_outputs.json)
           service=$(jq -r '.service_name.value // empty' tf_outputs.json)
+
+          echo "repo=$repo"
+          echo "cluster=$cluster"
+          echo "service=$service"
+
+          test -n "$repo"    || { echo "::error::Missing ecr_repository_url"; exit 1; }
+          test -n "$cluster" || { echo "::error::Missing cluster_name"; exit 1; }
+          test -n "$service" || { echo "::error::Missing service_name"; exit 1; }
 
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
           echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
           echo "service=$service" >> "$GITHUB_OUTPUT"
 
-          # Hard fail if any are empty to avoid REPO=null later
-          test -n "$repo" || { echo "::error::Missing ecr_repository_url in Terraform outputs"; exit 1; }
-          test -n "$cluster" || { echo "::error::Missing cluster_name in Terraform outputs"; exit 1; }
-          test -n "$service" || { echo "::error::Missing service_name in Terraform outputs"; exit 1; }
-
-      - name: Show parsed values (sanity)
-        run: |
-          echo "Repo:     ${{ steps.parse.outputs.repo }}"
-          echo "Cluster:  ${{ steps.parse.outputs.cluster }}"
-          echo "Service:  ${{ steps.parse.outputs.service }}"
-
-      - name: Login to ECR
+      - name: Log in to ECR
         env:
-          REPO: ${{ steps.parse.outputs.repo }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          REPO: ${{ steps.tfout.outputs.repo }}
         run: |
           set -euo pipefail
-          REGISTRY="$(echo "$REPO" | awk -F/ '{print $1}')"
-          echo "Logging in to: $REGISTRY"
+          REGISTRY="${REPO%%/*}"   # everything before first '/'
           aws ecr get-login-password --region "$AWS_REGION" \
           | docker login --username AWS --password-stdin "$REGISTRY"
 
-      - name: Build & push image
+      - name: Build and push image
+        id: build_push
         env:
-          REPO: ${{ steps.parse.outputs.repo }}
+          IMAGE_URI: ${{ steps.tfout.outputs.repo }}
         run: |
           set -euo pipefail
-          docker build -t "$REPO:latest" .
-          docker push "$REPO:latest"
+          GIT_SHA="${GITHUB_SHA::7}"
+          docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$GIT_SHA" .
+          docker push "$IMAGE_URI:latest"
+          docker push "$IMAGE_URI:$GIT_SHA"
+          echo "image_tag=$GIT_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Blue/green update to new image
+      - name: Update ECS service to new image
         env:
-          CLUSTER:   ${{ steps.parse.outputs.cluster }}
-          SERVICE:   ${{ steps.parse.outputs.service }}
-          CONTAINER: ${{ env.CONTAINER_NAME }}
-          NEW_IMAGE: ${{ steps.parse.outputs.repo }}:latest
+          CLUSTER: ${{ steps.tfout.outputs.cluster }}
+          SERVICE: ${{ steps.tfout.outputs.service }}
+          IMAGE_URI: ${{ steps.tfout.outputs.repo }}
+          TAG: ${{ steps.build_push.outputs.image_tag }}
         run: |
           set -euo pipefail
           TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-                   --query "services[0].taskDefinition" --output text)
-
+                    --query 'services[0].taskDefinition' --output text)
           aws ecs describe-task-definition --task-definition "$TD_ARN" \
-            --query "taskDefinition" > td.json
+            --query 'taskDefinition' > td.json
 
-          jq --arg name "$CONTAINER" --arg image "$NEW_IMAGE" '
-            .containerDefinitions |= (map(if .name==$name then .image=$image else . end)) |
-            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,
-                .registeredAt,.registeredBy)
-          ' td.json > new-td.json
+          jq '
+            del(.revision, .status, .taskDefinitionArn, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+            | .containerDefinitions = (.containerDefinitions | map(
+                if .name == env.CONTAINER_NAME
+                then .image = (env.IMAGE_URI + ":" + env.TAG) | .
+                else .
+                end))
+          ' CONTAINER_NAME="${{ env.CONTAINER_NAME }}" IMAGE_URI="$IMAGE_URI" TAG="$TAG" td.json > td-new.json
 
-          NEW_TD_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://new-td.json \
-            --query "taskDefinition.taskDefinitionArn" --output text)
+          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-new.json \
+                        --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "New TD: $NEW_TD_ARN"
 
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-                                 --task-definition "$NEW_TD_ARN"
+            --task-definition "$NEW_TD_ARN" --force-new-deployment \
+            --query 'service.deployments[0].rolloutState' --output text
 
-          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-
-      - name: Show final service status
+      - name: Show networking (subnets -> VPC)
         env:
-          CLUSTER: ${{ steps.parse.outputs.cluster }}
-          SERVICE: ${{ steps.parse.outputs.service }}
+          CLUSTER: ${{ steps.tfout.outputs.cluster }}
+          SERVICE: ${{ steps.tfout.outputs.service }}
         run: |
-          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].{taskDefinition:taskDefinition,desired:desiredCount,running:runningCount,pending:pendingCount,events:events[:3]}'
+          set -euo pipefail
+          subs=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+                  --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' --output text)
+          echo "Service subnets: $subs"
+          for s in $subs; do
+            aws ec2 describe-subnets --subnet-ids "$s" \
+              --query 'Subnets[0].{Subnet:SubnetId,VPC:VpcId,CIDR:CidrBlock,AZ:AvailabilityZone}' --output table
+          done
