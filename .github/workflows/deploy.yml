@@ -1,4 +1,4 @@
-name: CI + Deploy
+name: CI + Deploy (ECS Fargate)
 
 on:
   push:
@@ -14,40 +14,57 @@ env:
   CONTAINER_NAME: fastapi-todo
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Inspect GitHub OIDC token (sub/aud)
+        id: inspect-oidc
+        uses: actions/github-script@v7
         with:
-          terraform_version: 1.9.5
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            core.notice(`OIDC aud: ${payload.aud}`);
+            core.notice(`OIDC sub: ${payload.sub}`);
+            core.setOutput('aud', payload.aud);
+            core.setOutput('sub', payload.sub);
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_GITHUB_OIDC_ROLE_ARN }}
+
+      - name: Who am I (sanity)
+        run: aws sts get-caller-identity
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
 
       - name: Terraform init/plan/apply
         working-directory: ./terraform
         run: |
           set -euxo pipefail
-          terraform --version
           terraform init -input=false -no-color
           terraform validate -no-color
           terraform plan -input=false -no-color -out tfplan
           terraform apply -input=false -auto-approve tfplan
 
-      - name: Capture Terraform outputs
+      - name: Terraform outputs (ECR, cluster, service)
         id: tfout
         working-directory: ./terraform
         run: |
           set -euo pipefail
-          terraform output -json | tee tf_outputs.json
+          terraform output -json > tf_outputs.json
           test "$(jq 'length' tf_outputs.json)" -gt 0 || { echo "::error::No Terraform outputs"; exit 1; }
 
           repo=$(jq -r '.ecr_repository_url.value // empty' tf_outputs.json)
@@ -66,68 +83,67 @@ jobs:
           echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
           echo "service=$service" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to ECR
+      - name: Show parsed values (sanity)
+        run: |
+          echo "Repo:     ${{ steps.tfout.outputs.repo }}"
+          echo "Cluster:  ${{ steps.tfout.outputs.cluster }}"
+          echo "Service:  ${{ steps.tfout.outputs.service }}"
+
+      - name: Login to ECR
         env:
-          AWS_REGION: ${{ env.AWS_REGION }}
           REPO: ${{ steps.tfout.outputs.repo }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set -euo pipefail
-          REGISTRY="${REPO%%/*}"   # everything before first '/'
+          REGISTRY="${REPO%%/*}"
+          echo "Logging in to: $REGISTRY"
           aws ecr get-login-password --region "$AWS_REGION" \
           | docker login --username AWS --password-stdin "$REGISTRY"
 
-      - name: Build and push image
-        id: build_push
+      - name: Build & push image
+        id: buildpush
         env:
-          IMAGE_URI: ${{ steps.tfout.outputs.repo }}
+          REPO: ${{ steps.tfout.outputs.repo }}
         run: |
           set -euo pipefail
           GIT_SHA="${GITHUB_SHA::7}"
-          docker build -t "$IMAGE_URI:latest" -t "$IMAGE_URI:$GIT_SHA" .
-          docker push "$IMAGE_URI:latest"
-          docker push "$IMAGE_URI:$GIT_SHA"
+          docker build -t "$REPO:latest" -t "$REPO:$GIT_SHA" .
+          docker push "$REPO:latest"
+          docker push "$REPO:$GIT_SHA"
           echo "image_tag=$GIT_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Update ECS service to new image
+      - name: Blue/green update to new image
         env:
-          CLUSTER: ${{ steps.tfout.outputs.cluster }}
-          SERVICE: ${{ steps.tfout.outputs.service }}
-          IMAGE_URI: ${{ steps.tfout.outputs.repo }}
-          TAG: ${{ steps.build_push.outputs.image_tag }}
+          CLUSTER:   ${{ steps.tfout.outputs.cluster }}
+          SERVICE:   ${{ steps.tfout.outputs.service }}
+          CONTAINER: ${{ env.CONTAINER_NAME }}
+          NEW_IMAGE: ${{ steps.tfout.outputs.repo }}:${{ steps.buildpush.outputs.image_tag }}
         run: |
           set -euo pipefail
           TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-                    --query 'services[0].taskDefinition' --output text)
+                   --query "services[0].taskDefinition" --output text)
+
           aws ecs describe-task-definition --task-definition "$TD_ARN" \
-            --query 'taskDefinition' > td.json
+            --query "taskDefinition" > td.json
 
-          jq '
-            del(.revision, .status, .taskDefinitionArn, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-            | .containerDefinitions = (.containerDefinitions | map(
-                if .name == env.CONTAINER_NAME
-                then .image = (env.IMAGE_URI + ":" + env.TAG) | .
-                else .
-                end))
-          ' CONTAINER_NAME="${{ env.CONTAINER_NAME }}" IMAGE_URI="$IMAGE_URI" TAG="$TAG" td.json > td-new.json
+          jq --arg name "$CONTAINER" --arg image "$NEW_IMAGE" '
+            .containerDefinitions |= (map(if .name==$name then .image=$image else . end)) |
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,
+                .registeredAt,.registeredBy)
+          ' td.json > new-td.json
 
-          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-new.json \
-                        --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "New TD: $NEW_TD_ARN"
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-td.json \
+            --query "taskDefinition.taskDefinitionArn" --output text)
 
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-            --task-definition "$NEW_TD_ARN" --force-new-deployment \
-            --query 'service.deployments[0].rolloutState' --output text
+                                 --task-definition "$NEW_TD_ARN"
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
-      - name: Show networking (subnets -> VPC)
+      - name: Show final service status
         env:
           CLUSTER: ${{ steps.tfout.outputs.cluster }}
           SERVICE: ${{ steps.tfout.outputs.service }}
         run: |
-          set -euo pipefail
-          subs=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-                  --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' --output text)
-          echo "Service subnets: $subs"
-          for s in $subs; do
-            aws ec2 describe-subnets --subnet-ids "$s" \
-              --query 'Subnets[0].{Subnet:SubnetId,VPC:VpcId,CIDR:CidrBlock,AZ:AvailabilityZone}' --output table
-          done
+          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].{taskDefinition:taskDefinition,desired:desiredCount,running:runningCount,pending:pendingCount,events:events[:3]}'
