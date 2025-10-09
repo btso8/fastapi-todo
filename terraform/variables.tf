@@ -122,3 +122,8 @@ variable "oidc_role_name" {
   type        = string
   default     = "github-actions-oidc-ecs-deployer"
 }
+
+variable "admin_managed_policy_arn" {
+  type    = string
+  default = "arn:aws:iam::aws:policy/AdministratorAccess"
+}

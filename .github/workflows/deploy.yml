@@ -1,4 +1,4 @@
-name: CI + Deploy (ECS Fargate)
+name: Bootstrap + Deploy (ECS Fargate)
 
 on:
   push:
@@ -12,37 +12,70 @@ permissions:
 env:
   AWS_REGION: eu-west-2
   CONTAINER_NAME: fastapi-todo
+  OIDC_ROLE_NAME: github-actions-oidc-ecs-deployer
 
 jobs:
+  bootstrap-iam:
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.check-role.outputs.created }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if deploy role exists
+        id: check-role
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          OIDC_ROLE_NAME: ${{ env.OIDC_ROLE_NAME }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN:     ${{ secrets.AWS_BOOTSTRAP_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if aws iam get-role --role-name "$OIDC_ROLE_NAME" >/dev/null 2>&1; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy role already exists."
+          else
+            echo "created=true" >> "$GITHUB_OUTPUT"
+            echo "Deploy role not found; will bootstrap."
+          fi
+
+      - name: Setup Terraform
+        if: steps.check-role.outputs.created == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.6
+
+      - name: Bootstrap OIDC provider + deploy role (Terraform)
+        if: steps.check-role.outputs.created == 'true'
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN:     ${{ secrets.AWS_BOOTSTRAP_SESSION_TOKEN }}
+        working-directory: ./terraform
+        run: |
+          set -euxo pipefail
+          terraform init -input=false -no-color
+          # Apply only the IAM bootstrap resources (no need to build VPC/ECS yet)
+          terraform apply -input=false -auto-approve -target=aws_iam_openid_connect_provider.github -target=aws_iam_role.github_actions_deployer -target=aws_iam_role_policy_attachment.deployer_admin
+          terraform output -json | jq .
+
   build-and-deploy:
     runs-on: ubuntu-latest
+    needs: [bootstrap-iam]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Inspect GitHub OIDC token (sub/aud)
-        id: inspect-oidc
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            core.notice(`OIDC aud: ${payload.aud}`);
-            core.notice(`OIDC sub: ${payload.sub}`);
-            core.setOutput('aud', payload.aud);
-            core.setOutput('sub', payload.sub);
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_GITHUB_OIDC_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ env.OIDC_ROLE_NAME }}
 
-      - name: Who am I (sanity)
+      - name: Who am I
         run: aws sts get-caller-identity
 
       - name: Setup Terraform
@@ -55,39 +88,21 @@ jobs:
         run: |
           set -euxo pipefail
           terraform init -input=false -no-color
-          terraform validate -no-color
           terraform plan -input=false -no-color -out tfplan
           terraform apply -input=false -auto-approve tfplan
 
-      - name: Terraform outputs (ECR, cluster, service)
+      - name: Capture outputs
         id: tfout
         working-directory: ./terraform
         run: |
           set -euo pipefail
           terraform output -json > tf_outputs.json
-          test "$(jq 'length' tf_outputs.json)" -gt 0 || { echo "::error::No Terraform outputs"; exit 1; }
-
-          repo=$(jq -r '.ecr_repository_url.value // empty' tf_outputs.json)
-          cluster=$(jq -r '.cluster_name.value // empty' tf_outputs.json)
-          service=$(jq -r '.service_name.value // empty' tf_outputs.json)
-
-          echo "repo=$repo"
-          echo "cluster=$cluster"
-          echo "service=$service"
-
-          test -n "$repo"    || { echo "::error::Missing ecr_repository_url"; exit 1; }
-          test -n "$cluster" || { echo "::error::Missing cluster_name"; exit 1; }
-          test -n "$service" || { echo "::error::Missing service_name"; exit 1; }
-
-          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          repo=$(jq -r '.ecr_repository_url.value' tf_outputs.json)
+          cluster=$(jq -r '.cluster_name.value' tf_outputs.json)
+          service=$(jq -r '.service_name.value' tf_outputs.json)
+          echo "repo=$repo"       >> "$GITHUB_OUTPUT"
           echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
           echo "service=$service" >> "$GITHUB_OUTPUT"
-
-      - name: Show parsed values (sanity)
-        run: |
-          echo "Repo:     ${{ steps.tfout.outputs.repo }}"
-          echo "Cluster:  ${{ steps.tfout.outputs.cluster }}"
-          echo "Service:  ${{ steps.tfout.outputs.service }}"
 
       - name: Login to ECR
         env:
@@ -96,7 +111,6 @@ jobs:
         run: |
           set -euo pipefail
           REGISTRY="${REPO%%/*}"
-          echo "Logging in to: $REGISTRY"
           aws ecr get-login-password --region "$AWS_REGION" \
           | docker login --username AWS --password-stdin "$REGISTRY"
 
@@ -112,7 +126,7 @@ jobs:
           docker push "$REPO:$GIT_SHA"
           echo "image_tag=$GIT_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Blue/green update to new image
+      - name: Update ECS service to new image
         env:
           CLUSTER:   ${{ steps.tfout.outputs.cluster }}
           SERVICE:   ${{ steps.tfout.outputs.service }}
@@ -120,30 +134,12 @@ jobs:
           NEW_IMAGE: ${{ steps.tfout.outputs.repo }}:${{ steps.buildpush.outputs.image_tag }}
         run: |
           set -euo pipefail
-          TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-                   --query "services[0].taskDefinition" --output text)
-
-          aws ecs describe-task-definition --task-definition "$TD_ARN" \
-            --query "taskDefinition" > td.json
-
+          TD_ARN=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query "services[0].taskDefinition" --output text)
+          aws ecs describe-task-definition --task-definition "$TD_ARN" --query "taskDefinition" > td.json
           jq --arg name "$CONTAINER" --arg image "$NEW_IMAGE" '
-            .containerDefinitions |= (map(if .name==$name then .image=$image else . end)) |
-            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,
-                .registeredAt,.registeredBy)
+            .containerDefinitions |= (map(if .name==$name then .image=$image else . end))
+            | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
           ' td.json > new-td.json
-
-          NEW_TD_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://new-td.json \
-            --query "taskDefinition.taskDefinitionArn" --output text)
-
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-                                 --task-definition "$NEW_TD_ARN"
+          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://new-td.json --query "taskDefinition.taskDefinitionArn" --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW_TD_ARN"
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
-
-      - name: Show final service status
-        env:
-          CLUSTER: ${{ steps.tfout.outputs.cluster }}
-          SERVICE: ${{ steps.tfout.outputs.service }}
-        run: |
-          aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].{taskDefinition:taskDefinition,desired:desiredCount,running:runningCount,pending:pendingCount,events:events[:3]}'
