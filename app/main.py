@@ -103,7 +103,7 @@ instrumentator = Instrumentator(
 instrumentator.add(default())
 instrumentator.add(latency(buckets=(50, 100, 200, 300, 500, 1000, 2000, 5000)))
 instrumentator.add(reqs_inprogress())
-instrumentator.instrument(app).expose(app, include_in_schema=False, should_gzip=True)
+instrumentator.instrument(app).expose(app, should_gzip=True)
 
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(MaxBodySizeMiddleware)
