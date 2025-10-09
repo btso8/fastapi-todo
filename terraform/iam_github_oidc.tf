@@ -1,5 +1,7 @@
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
+data "aws_caller_identity" "current" {}
+
+locals {
+  github_oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
 }
 
 data "aws_iam_policy_document" "github_oidc_trust" {
@@ -9,7 +11,7 @@ data "aws_iam_policy_document" "github_oidc_trust" {
 
     principals {
       type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
 
     condition {
@@ -67,6 +69,14 @@ data "aws_iam_policy_document" "ecs_ecr_min" {
       "ecs:DescribeTasks"
     ]
     resources = ["*"]
+  }
+
+  statement {
+    effect  = "Allow"
+    actions = ["iam:PassRole"]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/fastapi-todo-*"
+    ]
   }
 }
 
