@@ -5,7 +5,7 @@ def status_ok(code: int) -> bool:
 def test_health(test_client):
     r = test_client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "healthy"}
+    assert r.json() == {"status": "ok"}
 
 
 def test_create_and_get_task(test_client):

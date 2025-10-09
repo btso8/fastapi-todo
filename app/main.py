@@ -153,7 +153,7 @@ async def relax_csp_for_docs(request: Request, call_next):
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "ok"}
 
 
 @app.post("/tasks/", response_model=TaskOut, status_code=201)
