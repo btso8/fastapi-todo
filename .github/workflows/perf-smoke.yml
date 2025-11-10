@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: k6 smoke (GET /health)
-        uses: grafana/k6-action@v0.2.0
+        uses: grafana/k6-action@v0.3.1
         with:
           filename: k6/smoke.js
         env:
