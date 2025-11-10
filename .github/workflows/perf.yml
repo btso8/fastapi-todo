@@ -14,7 +14,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: k6 smoke (very light)
         uses: grafana/k6-action@v0.2.0
         with:
@@ -26,7 +26,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: k6 ramp (p95<300ms, no failures)
         uses: grafana/k6-action@v0.2.0
         with:
